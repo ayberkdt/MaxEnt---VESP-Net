@@ -1,4 +1,4 @@
-from experimental_vesp.run_ablation import main
+from vesp.training.run_ablation import main
 
 
 if __name__ == "__main__":

@@ -1,4 +1,4 @@
-from experimental_vesp.feasibility import main
+from vesp.training.feasibility import main
 
 
 if __name__ == "__main__":

@@ -1,6 +1,6 @@
 import torch
 
-from experimental_vesp.losses import moment_losses, shell_energy
+from vesp.core.losses import moment_losses, shell_energy
 
 
 def test_monopole_and_dipole():

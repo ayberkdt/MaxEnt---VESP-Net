@@ -1,6 +1,6 @@
 import torch
 
-from experimental_vesp.sources import fibonacci_sphere, single_shell_sources, multi_shell_sources
+from vesp.core.sources import fibonacci_sphere, single_shell_sources, multi_shell_sources
 
 
 def test_fibonacci_sphere_unit_norm():

@@ -1,4 +1,4 @@
-from experimental_vesp.train import main
+from vesp.training.train import main
 
 
 if __name__ == "__main__":

@@ -3,8 +3,8 @@ import math
 
 import torch
 
-from experimental_vesp.data import ResidualGravityData
-from experimental_vesp.target_scaling import (
+from vesp.data.dataset import ResidualGravityData
+from vesp.data.target_scaling import (
     compute_target_scales,
     observation_row_weights,
     write_target_scales,

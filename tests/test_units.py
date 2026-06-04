@@ -3,8 +3,8 @@ import json
 import pytest
 import torch
 
-from experimental_vesp.data import ResidualGravityData, load_csv_dataset, prepare_data_for_model
-from experimental_vesp.units import (
+from vesp.data.dataset import ResidualGravityData, load_csv_dataset, prepare_data_for_model
+from vesp.common.units import (
     PositionScaler,
     UnitConfig,
     normalized_gradient_to_physical_acceleration,

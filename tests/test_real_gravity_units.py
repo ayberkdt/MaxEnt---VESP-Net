@@ -3,10 +3,10 @@ import json
 import numpy as np
 import torch
 
-from experimental_vesp import real_gravity
-from experimental_vesp.data import load_csv_dataset
-from experimental_vesp.real_gravity import SphericalHarmonicGravityModel
-from experimental_vesp.units import normalized_gradient_to_physical_acceleration
+from vesp.data import real_gravity
+from vesp.data.dataset import load_csv_dataset
+from vesp.data.real_gravity import SphericalHarmonicGravityModel
+from vesp.common.units import normalized_gradient_to_physical_acceleration
 
 
 def test_normalized_gradient_to_physical_acceleration_factor():

@@ -1,6 +1,6 @@
 import torch
 
-from experimental_vesp.kernels import (
+from vesp.core.kernels import (
     acceleration_kernel,
     evaluate_potential_acceleration_chunked,
     potential_kernel,

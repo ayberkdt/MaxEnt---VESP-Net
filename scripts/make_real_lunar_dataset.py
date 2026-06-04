@@ -10,7 +10,7 @@ def main() -> None:
         [
             sys.executable,
             "-m",
-            "experimental_vesp.real_gravity",
+            "vesp.data.real_gravity",
             "--model",
             "gl0420a",
             "--n-query",

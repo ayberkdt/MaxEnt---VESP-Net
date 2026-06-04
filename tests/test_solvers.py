@@ -1,6 +1,6 @@
 import torch
 
-from experimental_vesp.solvers import (
+from vesp.core.solvers import (
     RidgeSolveConfig,
     build_regularization_rows,
     solve_discrete_ridge,

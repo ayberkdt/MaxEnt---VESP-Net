@@ -18,6 +18,58 @@ The next scientific decision is whether deterministic single-shell and
 multi-shell equivalent-source VESP represent hard synthetic and real SH
 residual fields accurately enough to justify Stage 3 entropy regularization.
 
+## Project Structure
+
+The code is packaged as `vesp` under a `src/` layout. Modules are grouped by
+responsibility so each layer can evolve independently:
+
+```text
+src/vesp/
+    common/      cross-cutting infrastructure
+                   artifacts.py      atomic writes, run manifests, checksums
+                   config.py         YAML config load / merge / validate
+                   units.py          position/acceleration unit handling
+                   lunar.py          lunar constants + metadata contract
+    core/        math and model core
+                   kernels.py        Newtonian kernel + dense operator
+                   operators.py      potential/acceleration/joint operators
+                   sources.py        source geometry (fibonacci, shells)
+                   solvers.py        ridge / Tikhonov least squares
+                   losses.py         moment losses, shell energy, composite
+                   models.py         DiscreteVESP, MultiShellDiscreteVESP
+                   metrics.py        RMSE / angle / relative error metrics
+                   diagnostics.py    source localization diagnostics
+    data/        datasets and IO
+                   dataset.py        ResidualGravity data + CSV loading
+                   synthetic.py      synthetic residual generation
+                   splits.py         train/val/test splits
+                   gravity_io.py     SHADR/SHA coefficient parsing
+                   real_gravity.py   GRAIL/PDS spherical-harmonic ingestion
+                   target_scaling.py target normalization scales
+    training/    pipelines and CLI entry points
+                   train.py          unified config-driven entry point
+                   train_discrete.py single-run solve/train pipeline
+                   train_multishell.py / run_ablation.py / feasibility.py
+                   evaluate.py       evaluation + artifact writing
+    analysis/    analysis.py, advanced_analysis.py (reports / plots / PDF)
+    extensions/  Stage-3 scaffolds: entropy, neural_density,
+                 probabilistic, force_model (not the full MaxEnt framework)
+    app/         ui.py (PyQt6 workbench)
+
+configs/         experiment YAML configs (single source of truth)
+scripts/         dataset builders and orchestration helpers
+tests/           pytest suite
+data/            input gravity models and prepared residual CSVs
+outputs/         generated run artifacts (git-ignored)
+pyproject.toml   packaging (src layout) + pytest config
+```
+
+Intra-package imports use absolute `vesp.*` paths (e.g.
+`from vesp.core.models import DiscreteVESP`). The thin root scripts
+`train_discrete.py`, `train_multishell.py`, `run_ablation.py`, and
+`run_feasibility.py` are convenience wrappers that delegate to the matching
+`vesp.training.*` module.
+
 ## Current Scope: Stage 1-2 Only
 
 Stage 1 uses fixed single-shell equivalent sources:
@@ -44,8 +96,8 @@ Delta a(x) = sum_j sum_i w_ji sigma_ji (s_ji - x) / ||x - s_ji||^3
 - Uncertainty-aware orbit propagation
 - Partition-function based inference
 
-Extension placeholders are intentionally reserved for `entropy.py`,
-`neural_density.py`, `probabilistic.py`, and `force_model.py`.
+Extension placeholders are intentionally reserved under `src/vesp/extensions/`
+(`entropy.py`, `neural_density.py`, `probabilistic.py`, and `force_model.py`).
 
 ## Mathematical Formulation
 
@@ -136,8 +188,12 @@ acceleration_scale = sqrt(mean(Deltaa_x^2 + Deltaa_y^2 + Deltaa_z^2))
 
 The same scales are then used for validation/test row weighting. Ridge rows use
 `sqrt(lambda_potential) / potential_scale` for potential and
-`sqrt(lambda_acceleration) / acceleration_scale` for acceleration. Each run with
-target normalization writes `target_scales.json`.
+`sqrt(lambda_acceleration) / acceleration_scale` for acceleration.
+
+Target normalization only affects the solve/training objective. Reported RMSE
+metrics are computed in the original raw target units after model prediction.
+Every run writes `target_scales.json`; when normalization is disabled, both
+scales are `1.0` and their sources are recorded as `disabled`.
 
 ## Source Geometry And Weights
 
@@ -157,8 +213,12 @@ localized or physically brittle.
 
 ## Installation
 
+The package uses a `src/` layout and is installed in editable mode so that the
+`vesp` package and the `python -m vesp.*` entry points resolve from anywhere:
+
 ```powershell
 pip install -r requirements.txt
+pip install -e .
 ```
 
 ## Running Smoke Tests
@@ -168,16 +228,22 @@ python scripts/smoke_test.py
 pytest tests/
 ```
 
+Before reporting numerical results, run the full deterministic checklist:
+
+```powershell
+python scripts/pre_results_check.py
+```
+
 ## Running Stage 1 Single-Shell Experiment
 
 ```powershell
-python -m experimental_vesp.train --config configs/discrete_single_shell.yaml
+python -m vesp.training.train --config configs/discrete_single_shell.yaml
 ```
 
 ## Running Stage 2 Multi-Shell Experiment
 
 ```powershell
-python -m experimental_vesp.train --config configs/discrete_multishell.yaml
+python -m vesp.training.train --config configs/discrete_multishell.yaml
 ```
 
 ## Running Ablations
@@ -198,7 +264,7 @@ ablation_summary.md
 Run the compact decision suite:
 
 ```powershell
-python -m experimental_vesp.feasibility --config configs/feasibility_suite.yaml
+python -m vesp.training.feasibility --config configs/feasibility_suite.yaml
 ```
 
 It tests:
@@ -230,9 +296,9 @@ outputs/<run_name>/
     diagnostics.json
     altitude_binned_error.csv
     shell_energy.csv
+    target_scales.json
     summary.txt
     run_manifest.json
-    target_scales.json  # only when loss.normalize_targets=true
 ```
 
 Top-level `.pt` checkpoints may also be produced for UI compatibility, but
@@ -279,7 +345,7 @@ solvers, and recovery behavior. It is not observational validation.
 A GRAIL/PDS spherical harmonic ingestion utility is available:
 
 ```powershell
-python -m experimental_vesp.real_gravity --model gl0420a --n-query 1024 --degree-min 2 --degree-max 60 --output data/lunar_grail_gl0420a_L60_residual.csv
+python -m vesp.data.real_gravity --model gl0420a --n-query 1024 --degree-min 2 --degree-max 60 --output data/lunar_grail_gl0420a_L60_residual.csv
 ```
 
 General real-data pipeline:
@@ -292,15 +358,20 @@ General real-data pipeline:
 
 Positions are normalized by `R_body` in the default synthetic experiments. Real
 CSV files must include the metadata sidecar generated by
-`experimental_vesp.real_gravity`, especially when acceleration is exported in
+`vesp.data.real_gravity`, especially when acceleration is exported in
 physical units. The loader rejects CSV input without explicit position-unit
 metadata unless a caller intentionally opts out for a legacy test.
+
+The ingestion utility also writes a compact diagnostics JSON next to the CSV,
+including query count, radius range, position norms, potential RMS,
+acceleration RMS, finite-difference step, reference radius, and GM.
 
 Real-data fitting templates:
 
 ```powershell
-python -m experimental_vesp.train --config configs/real_lunar_gl0420a.yaml
-python -m experimental_vesp.train --config configs/real_lunar_gl0420a_multishell.yaml
+python -m vesp.training.train --config configs/real_lunar_gl0420a.yaml
+python -m vesp.training.train --config configs/real_lunar_gl0420a_ood.yaml
+python -m vesp.training.train --config configs/real_lunar_gl0420a_multishell.yaml
 ```
 
 ## Lunar Metadata Contract
@@ -354,34 +425,36 @@ matrix-free Adam or future iterative LSQR-style solvers for larger runs.
 
 ## Extension Roadmap
 
-`entropy.py`:
+All Stage 3 scaffolds live under `src/vesp/extensions/`.
+
+`extensions/entropy.py`:
 
 - signed positive-negative entropy
 - relative entropy / KL prior
 - shell-wise entropy
 - effective source entropy
 
-`neural_density.py`:
+`extensions/neural_density.py`:
 
 - Angular MLP
 - Angular SIREN
 - SH encoding + MLP
 
-`probabilistic.py`:
+`extensions/probabilistic.py`:
 
 - posterior over sigma
 - variational source distribution
 - acceleration covariance
 
-`force_model.py`:
+`extensions/force_model.py`:
 
 - `predict_residual_accel(x)`
 - `predict_residual_accel_with_uncertainty(x)`
 
-Proceed to Stage 3 only if discrete and multi-shell VESP show enough
-representational power on hard synthetic or real residual fields.
+Do not start Stage 3 MaxEnt until deterministic Stage 1-2 checks pass on hard
+synthetic and small real residual datasets.
 
-Recommended Stage 3 starting point:
+When Stage 3 is justified later, the starting point should remain conservative:
 
 1. Keep ridge/Tikhonov as the baseline.
 2. Add deterministic entropy regularization over `sigma`.

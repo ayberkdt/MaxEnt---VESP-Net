@@ -1,6 +1,6 @@
 import pytest
 
-from experimental_vesp.lunar import (
+from vesp.common.lunar import (
     MU_MOON_SI,
     R_MOON_M,
     canonical_scales,

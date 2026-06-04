@@ -3,7 +3,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from experimental_vesp.gravity_io import read_shadr_ascii
+from vesp.data.gravity_io import read_shadr_ascii
 
 
 def _write_table(path: Path, rows: list[str]) -> Path:

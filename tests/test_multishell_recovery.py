@@ -1,7 +1,7 @@
 import torch
 
-from experimental_vesp.synthetic import make_multishell_truth_case
-from experimental_vesp.train import run_from_config
+from vesp.data.synthetic import make_multishell_truth_case
+from vesp.training.train import run_from_config
 
 
 def _cfg(model, output_dir="outputs/test_multishell"):

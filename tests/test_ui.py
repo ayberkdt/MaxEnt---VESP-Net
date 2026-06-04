@@ -12,7 +12,7 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QPixmap
 from PyQt6.QtWidgets import QApplication
 
-from experimental_vesp import ui
+from vesp.app import ui
 
 
 @pytest.fixture(scope="module")
@@ -90,7 +90,7 @@ def test_ui_feasibility_config_routes_to_feasibility_module(qapp, monkeypatch, t
         called = []
         monkeypatch.setattr(window, "_run_training", lambda module: called.append(module))
         window._run_selected_config()
-        assert called == ["experimental_vesp.feasibility"]
+        assert called == ["vesp.training.feasibility"]
 
 
 def test_ui_train_config_routes_to_unified_train_module(qapp, monkeypatch, tmp_path):
@@ -103,7 +103,7 @@ def test_ui_train_config_routes_to_unified_train_module(qapp, monkeypatch, tmp_p
         called = []
         monkeypatch.setattr(window, "_run_training", lambda module: called.append(module))
         window._run_selected_config()
-        assert called == ["experimental_vesp.train"]
+        assert called == ["vesp.training.train"]
 
 
 def test_ui_discovers_nested_sigma_without_auto_selecting(qapp, monkeypatch, tmp_path):

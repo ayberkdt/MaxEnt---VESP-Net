@@ -1,6 +1,6 @@
 import json
 
-from experimental_vesp.artifacts import atomic_write_json, compute_file_sha256, write_run_manifest
+from vesp.common.artifacts import atomic_write_json, compute_file_sha256, write_run_manifest
 
 
 def test_atomic_write_json_and_manifest(tmp_path):

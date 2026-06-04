@@ -1,8 +1,8 @@
 import pytest
 import torch
 
-from experimental_vesp.data import ResidualGravityData
-from experimental_vesp.splits import make_splits
+from vesp.data.dataset import ResidualGravityData
+from vesp.data.splits import make_splits
 
 
 def _data():

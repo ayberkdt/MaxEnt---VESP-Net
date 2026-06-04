@@ -1,7 +1,7 @@
 import torch
 
-from experimental_vesp.operators import build_acceleration_operator, build_joint_operator, build_potential_operator
-from experimental_vesp.sources import single_shell_sources
+from vesp.core.operators import build_acceleration_operator, build_joint_operator, build_potential_operator
+from vesp.core.sources import single_shell_sources
 
 
 def test_operator_shapes():
