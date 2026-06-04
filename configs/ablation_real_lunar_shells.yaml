@@ -1,0 +1,89 @@
+# Shell-set ablation for the real lunar multi-shell fit.
+# Compares candidate interior shell radius sets (incl. legacy S1 and new default S3)
+# under fixed conservative regularization. shell_energy_weights is given as a single
+# scalar so it broadcasts to whatever shell count each trial uses (e.g. 4-shell S4).
+# Run:  python -m vesp.training.run_ablation --config configs/ablation_real_lunar_shells.yaml [--mode full]
+ablation:
+  mode: quick
+  output_dir: outputs/ablation_real_lunar_shells
+
+base_config:
+  seed: 42
+  device: cpu
+  dtype: float64
+  body:
+    R_body: 1.0
+    normalize_positions: true
+    physical_R_body: 1738.0
+    physical_R_body_units: km
+    position_units: normalized
+    potential_units: km^2/s^2
+    acceleration_units: km/s^2
+  data:
+    type: csv
+    path: data/lunar_grail_gl0420a_L60_residual.csv
+    train_fraction: 0.8
+    seed: 42
+  model:
+    type: multishell
+    shell_alphas: [0.70, 0.86, 0.95]
+    n_sources_per_shell: [384, 512, 384]
+    weight_mode: surface_area
+  kernel:
+    eps: 0.0
+    acceleration_sign: 1.0
+    source_chunk_size: 1024
+  solver:
+    type: ridge
+    ridge_method: augmented_lstsq
+    lambda_l2: 1.0e-5
+    column_normalize: true
+  loss:
+    use_potential: true
+    use_acceleration: true
+    normalize_targets: true
+    potential_scale: auto
+    acceleration_scale: auto
+    lambda_potential: 0.2
+    lambda_acceleration: 1.0
+    lambda_l2: 1.0e-5
+    lambda_moment: 1.0e-4
+    lambda_dipole: 1.0
+    shell_energy_weights: 1.0e-5
+  split:
+    type: random
+    radius_units: normalized
+    train_fraction: 0.8
+  evaluation:
+    batch_size: 4096
+    n_altitude_bins: 6
+  output:
+    output_dir: outputs/ablation_real_lunar_shells
+
+quick:
+  - name: S1_legacy
+    model.shell_alphas: [0.50, 0.78, 0.86]
+    model.n_sources_per_shell: [384, 512, 384]
+  - name: S3_new_default
+    model.shell_alphas: [0.70, 0.86, 0.95]
+    model.n_sources_per_shell: [384, 512, 384]
+  - name: S5_shallow
+    model.shell_alphas: [0.80, 0.90, 0.97]
+    model.n_sources_per_shell: [384, 512, 384]
+
+full:
+  - name: S1_legacy
+    model.shell_alphas: [0.50, 0.78, 0.86]
+    model.n_sources_per_shell: [384, 512, 384]
+  - name: S2
+    model.shell_alphas: [0.50, 0.80, 0.95]
+    model.n_sources_per_shell: [384, 512, 384]
+  - name: S3_new_default
+    model.shell_alphas: [0.70, 0.86, 0.95]
+    model.n_sources_per_shell: [384, 512, 384]
+  - name: S4_four_shell
+    model.shell_alphas: [0.35, 0.65, 0.85, 0.95]
+    model.n_sources_per_shell: [256, 256, 384, 384]
+  - name: S5_shallow
+    model.shell_alphas: [0.80, 0.90, 0.97]
+    model.n_sources_per_shell: [384, 512, 384]

@@ -37,12 +37,54 @@ def condition_number_estimate(operator: torch.Tensor | None = None) -> float | N
         return None
 
 
+def shell_energy_collapse(
+    energies: torch.Tensor,
+    shell_rows: list[dict],
+    *,
+    threshold: float = 0.90,
+) -> dict[str, float | int | bool | None]:
+    """Summarize how concentrated shell energy is across shells.
+
+    Used to catch the multi-shell failure mode where almost all energy collapses
+    onto a single (usually innermost) shell.
+    """
+
+    if energies.numel() == 0:
+        return {
+            "dominant_shell_id": None,
+            "dominant_shell_alpha": None,
+            "dominant_shell_energy_fraction": None,
+            "shell_energy_entropy": None,
+            "shell_energy_effective_count": None,
+            "shell_collapse_flag": False,
+        }
+    total = torch.clamp(torch.sum(energies), min=torch.finfo(energies.dtype).eps)
+    p = energies / total
+    eps = torch.finfo(energies.dtype).tiny
+    entropy = float(-torch.sum(p * torch.log(p + eps)).detach().cpu())
+    dominant_id = int(torch.argmax(p).detach().cpu())
+    dominant_fraction = float(p[dominant_id].detach().cpu())
+    n_shells = int(energies.numel())
+    return {
+        "dominant_shell_id": dominant_id,
+        "dominant_shell_alpha": shell_rows[dominant_id]["shell_alpha"] if dominant_id < len(shell_rows) else None,
+        "dominant_shell_energy_fraction": dominant_fraction,
+        "shell_energy_entropy": entropy,
+        "shell_energy_effective_count": float(torch.exp(torch.tensor(entropy)).item()),
+        # A single-shell model trivially has fraction 1.0; collapse only applies to
+        # genuine multi-shell models.
+        "shell_collapse_flag": bool(n_shells > 1 and dominant_fraction > float(threshold)),
+    }
+
+
 def source_diagnostics(
     *,
     source_positions: torch.Tensor,
     source_weights: torch.Tensor,
     shell_ids: torch.Tensor,
     sigma: torch.Tensor,
+    shell_collapse_threshold: float = 0.90,
+    sigma_l2_warning_threshold: float = 1.0,
 ) -> dict[str, float | list[float]]:
     moments = moment_losses(source_positions, source_weights, sigma)
     energies = shell_energy(sigma, source_weights, shell_ids)
@@ -61,8 +103,13 @@ def source_diagnostics(
                 "sigma_norm": float(torch.linalg.norm(sigma[mask]).detach().cpu()),
             }
         )
+    sigma_l2 = float(torch.linalg.norm(sigma).detach().cpu())
+    collapse = shell_energy_collapse(energies, shell_rows, threshold=shell_collapse_threshold)
     return {
-        "sigma_l2": float(torch.linalg.norm(sigma).detach().cpu()),
+        "sigma_l2": sigma_l2,
+        "sigma_linf": float(torch.max(torch.abs(sigma)).detach().cpu()),
+        "sigma_rms": float(torch.sqrt(torch.mean(sigma * sigma)).detach().cpu()),
+        "sigma_norm_warning": bool(sigma_l2 > float(sigma_l2_warning_threshold)),
         "weighted_sigma_l2": float(torch.linalg.norm(weighted_sigma).detach().cpu()),
         "sigma_abs_max": float(torch.max(torch.abs(sigma)).detach().cpu()),
         "effective_source_count": effective_source_count(weighted_sigma),
@@ -72,6 +119,7 @@ def source_diagnostics(
         "dipole_leakage": float(torch.sqrt(moments["dipole"]).detach().cpu()),
         "shell_energy": [float(v.detach().cpu()) for v in energies],
         "shell_energy_distribution": shell_rows,
+        **collapse,
     }
 
 

@@ -18,6 +18,7 @@ from vesp.common.config import load_config
 from vesp.data.dataset import ResidualGravityData, ResidualGravityDataset, load_csv_dataset
 from vesp.core.diagnostics import source_diagnostics, time_inference
 from vesp.core.metrics import (
+    altitude_band_errors,
     altitude_binned_error,
     radial_cross_radial_error,
     relative_rmse_acceleration,
@@ -42,6 +43,9 @@ def evaluate_model(
     acceleration_sign: float = 1.0,
     device: str | torch.device = "cpu",
     n_altitude_bins: int = 6,
+    altitude_bands: dict | None = None,
+    shell_collapse_threshold: float = 0.90,
+    sigma_l2_warning_threshold: float = 1.0,
 ) -> dict:
     model = model.to(device)
     data = data.to(device)
@@ -90,11 +94,14 @@ def evaluate_model(
         "cross_radial_acceleration_rmse": rc["cross_norm_rmse"],
         **vector_angle_error(pred_a_t, true_a_t),
         "altitude_binned_error": altitude_binned_error(xs_t, pred_a_t, true_a_t, n_bins=n_altitude_bins),
+        **altitude_band_errors(xs_t, pred_a_t, true_a_t, bands=altitude_bands),
         "diagnostics": source_diagnostics(
             source_positions=model.source_positions,
             source_weights=model.source_weights,
             shell_ids=model.shell_ids,
             sigma=model.sigma,
+            shell_collapse_threshold=shell_collapse_threshold,
+            sigma_l2_warning_threshold=sigma_l2_warning_threshold,
         ),
         "inference_seconds_per_batch": time_inference(
             model,
@@ -167,12 +174,19 @@ def write_evaluation_artifacts(
     summary_lines = [
         "VESP Run Summary",
         "",
+        f"acceptability_status: {metrics.get('acceptability_status')}",
         f"potential_rmse: {metrics.get('potential_rmse')}",
         f"acceleration_rmse: {metrics.get('acceleration_rmse')}",
         f"relative_acceleration_rmse: {metrics.get('relative_acceleration_rmse')}",
         f"radial_rmse: {metrics.get('radial_rmse', metrics.get('radial_acceleration_rmse'))}",
         f"cross_radial_rmse: {metrics.get('cross_radial_rmse', metrics.get('cross_radial_acceleration_rmse'))}",
         f"angle_deg_p95: {metrics.get('angle_deg_p95')}",
+        "",
+        f"low_altitude_acceleration_rmse: {metrics.get('low_altitude_acceleration_rmse')}",
+        f"mid_altitude_acceleration_rmse: {metrics.get('mid_altitude_acceleration_rmse')}",
+        f"high_altitude_acceleration_rmse: {metrics.get('high_altitude_acceleration_rmse')}",
+        f"low_to_high_error_ratio: {metrics.get('low_to_high_error_ratio')}",
+        "",
         f"normalize_targets: {scale_payload.get('normalize_targets')}",
         f"potential_scale: {scale_payload.get('potential_scale')}",
         f"acceleration_scale: {scale_payload.get('acceleration_scale')}",
@@ -180,11 +194,23 @@ def write_evaluation_artifacts(
         f"acceleration_scale_source: {scale_payload.get('acceleration_source')}",
         f"metrics_units: {metrics.get('metrics_units', 'raw target units')}",
         f"training_loss_units: {metrics.get('training_loss_units')}",
+        "",
         f"sigma_l2: {diagnostics.get('sigma_l2')}",
+        f"sigma_norm_warning: {diagnostics.get('sigma_norm_warning')}",
         f"effective_source_count: {diagnostics.get('effective_source_count')}",
+        f"top_5pct_source_contribution: {diagnostics.get('top_5pct_source_contribution')}",
+        f"dominant_shell_alpha: {diagnostics.get('dominant_shell_alpha')}",
+        f"dominant_shell_energy_fraction: {diagnostics.get('dominant_shell_energy_fraction')}",
+        f"shell_energy_entropy: {diagnostics.get('shell_energy_entropy')}",
+        f"shell_collapse_flag: {diagnostics.get('shell_collapse_flag')}",
         f"monopole_leakage: {diagnostics.get('monopole_leakage')}",
         f"dipole_leakage: {diagnostics.get('dipole_leakage')}",
     ]
+    reasons = metrics.get("acceptability_reasons") or []
+    if reasons:
+        summary_lines.append("")
+        summary_lines.append("acceptability_reasons:")
+        summary_lines.extend(f"  - {reason}" for reason in reasons)
     atomic_write_text(layout.summary_txt, "\n".join(summary_lines) + "\n")
 
     artifacts = {

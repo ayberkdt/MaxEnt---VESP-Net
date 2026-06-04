@@ -60,6 +60,12 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "lambda_moment": 1.0e-6,
         "lambda_dipole": 1.0,
         "shell_energy_weights": [],
+        "altitude_weighting": {
+            "enabled": False,
+            "mode": "low_altitude_boost",
+            "r_threshold": 1.15,
+            "boost": 3.0,
+        },
     },
     "split": {
         "type": "random",
@@ -69,6 +75,24 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "evaluation": {
         "batch_size": 4096,
         "n_altitude_bins": 6,
+        "altitude_bands": {
+            "low": [1.03, 1.15],
+            "mid": [1.15, 1.35],
+            "high": [1.35, 1.60],
+        },
+    },
+    "diagnostics": {
+        "shell_collapse_threshold": 0.90,
+        "sigma_l2_warning_threshold": 1.0,
+    },
+    "acceptance": {
+        "max_relative_acceleration_rmse": 0.75,
+        "max_low_altitude_rmse_factor": 5.0,
+        "max_top5_source_contribution": 0.40,
+        "max_dominant_shell_energy_fraction": 0.90,
+        "max_sigma_l2": 1.0,
+        "max_monopole_leakage": 1.0e-8,
+        "max_dipole_leakage": 1.0e-8,
     },
     "output": {
         "output_dir": "outputs",
@@ -189,6 +213,29 @@ def validate_config(config: dict) -> None:
                     raise ValueError(f"loss.{key} must be 'auto' or a positive number")
             elif float(value) <= 0.0:
                 raise ValueError(f"loss.{key} must be 'auto' or a positive number")
+
+    altitude_weighting = loss.get("altitude_weighting", {})
+    if isinstance(altitude_weighting, dict) and bool(altitude_weighting.get("enabled", False)):
+        if float(altitude_weighting.get("boost", 1.0)) <= 0.0:
+            raise ValueError("loss.altitude_weighting.boost must be positive")
+        if float(altitude_weighting.get("r_threshold", 0.0)) <= 0.0:
+            raise ValueError("loss.altitude_weighting.r_threshold must be positive")
+
+    bands = config.get("evaluation", {}).get("altitude_bands", {})
+    if isinstance(bands, dict):
+        for name, band in bands.items():
+            if band is None:
+                continue
+            lo, hi = band
+            if float(lo) >= float(hi):
+                raise ValueError(f"evaluation.altitude_bands.{name} must be [min, max] with min < max")
+
+    diagnostics_cfg = config.get("diagnostics", {})
+    if isinstance(diagnostics_cfg, dict):
+        if not 0.0 < float(diagnostics_cfg.get("shell_collapse_threshold", 0.9)) <= 1.0:
+            raise ValueError("diagnostics.shell_collapse_threshold must be in (0, 1]")
+        if float(diagnostics_cfg.get("sigma_l2_warning_threshold", 1.0)) <= 0.0:
+            raise ValueError("diagnostics.sigma_l2_warning_threshold must be positive")
 
     kernel = config.get("kernel", {})
     if float(kernel.get("eps", kernel.get("softening", 0.0))) < 0.0:

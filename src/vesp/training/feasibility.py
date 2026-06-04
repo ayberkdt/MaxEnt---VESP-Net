@@ -238,6 +238,97 @@ def _decision(rows: list[dict], thresholds: dict | None = None) -> tuple[str, li
     return decision, positives, risks
 
 
+def _read_csv_rows(path: Path) -> list[dict]:
+    with path.open("r", encoding="utf-8", newline="") as handle:
+        return list(csv.DictReader(handle))
+
+
+def _row_float(row: dict, key: str) -> float | None:
+    value = row.get(key, "")
+    if value in ("", None):
+        return None
+    try:
+        out = float(value)
+    except (TypeError, ValueError):
+        return None
+    return None if out != out else out
+
+
+def _best(rows: list[dict], key: str, *, predicate=None) -> dict | None:
+    candidates = []
+    for row in rows:
+        if predicate is not None and not predicate(row):
+            continue
+        value = _row_float(row, key)
+        if value is not None:
+            candidates.append((value, row))
+    return min(candidates, key=lambda item: item[0])[1] if candidates else None
+
+
+def real_lunar_diagnostics_section(search_root: str | Path = "outputs") -> list[str]:
+    """Build the Real Lunar Stage 1-2 section from any ablation CSVs that exist.
+
+    Returns markdown lines. If no ablation results are present yet, a short notice is
+    returned instead so the readiness report is still self-explanatory.
+    """
+
+    root = Path(search_root)
+    csv_paths = sorted(root.glob("ablation_real_lunar_*/ablation_results.csv"))
+    lines = ["", "## Real Lunar Stage 1-2 Diagnostics", ""]
+    if not csv_paths:
+        lines += [
+            "- No real lunar ablation results found yet. Run the regularization, shell-set, and",
+            "  low-altitude weighting ablations to populate this section.",
+        ]
+        return lines
+
+    rows: list[dict] = []
+    for path in csv_paths:
+        try:
+            rows.extend(_read_csv_rows(path))
+        except OSError:
+            continue
+    succeeded = [r for r in rows if r.get("acceptability_status") not in ("", "FAILED")]
+
+    is_multishell = lambda r: str(r.get("model_type")) == "multishell"
+    not_collapsed = lambda r: str(r.get("shell_collapse_flag")) not in ("True", "true")
+
+    best_rel = _best(succeeded, "relative_acceleration_rmse")
+    best_low = _best(succeeded, "low_altitude_acceleration_rmse")
+    best_noncollapse = _best(succeeded, "relative_acceleration_rmse", predicate=lambda r: is_multishell(r) and not_collapsed(r))
+    best_single = _best(succeeded, "relative_acceleration_rmse", predicate=lambda r: str(r.get("model_type")) == "discrete")
+    collapsed = [r for r in succeeded if str(r.get("shell_collapse_flag")) in ("True", "true")]
+
+    def _fmt(row: dict | None, *cols: str) -> str:
+        if row is None:
+            return "none"
+        return f"`{row.get('run_name')}` (" + ", ".join(f"{c}={row.get(c)}" for c in cols) + ")"
+
+    lines += [
+        f"- Ablation tables scanned: {len(csv_paths)} ({sum(len(_read_csv_rows(p)) for p in csv_paths)} runs).",
+        f"- Best single-shell run: {_fmt(best_single, 'relative_acceleration_rmse', 'low_to_high_error_ratio')}",
+        f"- Best multi-shell run: {_fmt(best_rel if best_rel and is_multishell(best_rel) else best_noncollapse, 'relative_acceleration_rmse', 'dominant_shell_energy_fraction')}",
+        f"- Low-altitude bottleneck (best low-altitude RMSE): {_fmt(best_low, 'low_altitude_acceleration_rmse', 'low_to_high_error_ratio')}",
+        f"- Shell collapse status: {len(collapsed)} of {len(succeeded)} runs flagged as collapsed.",
+        f"- Best non-collapsed multi-shell run: {_fmt(best_noncollapse, 'relative_acceleration_rmse', 'sigma_l2', 'acceptability_status')}",
+        "",
+        "Recommendation:",
+    ]
+    if best_noncollapse is not None and best_noncollapse.get("acceptability_status") == "GOOD":
+        lines.append("- A non-collapsed multi-shell candidate passes screening: continue deterministic ablation.")
+    elif best_noncollapse is not None:
+        lines.append(
+            "- The best non-collapsed deterministic run still fails low-altitude / concentration screening: "
+            "proceed to Stage 3A Discrete MaxEnt regularization. Do not proceed to NN yet."
+        )
+    else:
+        lines.append(
+            "- No non-collapsed multi-shell run found: tighten regularization first; if collapse persists, "
+            "Stage 3A Discrete MaxEnt is justified. Do not proceed to NN yet."
+        )
+    return lines
+
+
 def run_feasibility_suite(config: dict | None = None) -> Path:
     base = _base_config()
     if config:
@@ -291,6 +382,7 @@ def run_feasibility_suite(config: dict | None = None) -> Path:
             f"{row['test_high_acc_rmse'] or '-'} | {row['test_low_acc_rmse'] or '-'} | "
             f"{row['effective_source_count']:.1f} | {row['top_5pct_source_contribution']:.2%} |"
         )
+    report_lines.extend(real_lunar_diagnostics_section(output_dir.parent if output_dir.name == "feasibility" else "outputs"))
     report_lines.extend(
         [
             "",

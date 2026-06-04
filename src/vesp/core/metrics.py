@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import warnings
+
 import torch
 
 
@@ -60,6 +62,65 @@ def vector_angle_error(pred: torch.Tensor, target: torch.Tensor) -> dict[str, fl
         "angle_deg_mean": float(torch.mean(deg).detach().cpu()),
         "angle_deg_p95": float(torch.quantile(deg, 0.95).detach().cpu()),
     }
+
+
+DEFAULT_ALTITUDE_BANDS: dict[str, list[float]] = {
+    "low": [1.03, 1.15],
+    "mid": [1.15, 1.35],
+    "high": [1.35, 1.60],
+}
+
+
+def altitude_band_errors(
+    positions: torch.Tensor,
+    pred_acceleration: torch.Tensor,
+    target_acceleration: torch.Tensor,
+    *,
+    bands: dict[str, list[float]] | None = None,
+    warn_empty: bool = True,
+) -> dict[str, float | int | None]:
+    """Acceleration RMSE inside named radial bands (low/mid/high) + ratio.
+
+    Real lunar residual fits are dominated by low-altitude error, so we report
+    each band separately instead of only a single global RMSE. A band with no
+    samples yields ``None`` (and a warning) rather than a misleading number.
+    """
+
+    bands = bands or DEFAULT_ALTITUDE_BANDS
+    radii = torch.linalg.norm(positions, dim=-1)
+    result: dict[str, float | int | None] = {}
+    band_rmse: dict[str, float | None] = {}
+    for name, band in bands.items():
+        if band is None:
+            band_rmse[name] = None
+            result[f"{name}_altitude_acceleration_rmse"] = None
+            result[f"{name}_altitude_count"] = 0
+            continue
+        lo, hi = float(band[0]), float(band[1])
+        mask = (radii >= lo) & (radii <= hi)
+        count = int(mask.sum().detach().cpu())
+        result[f"{name}_altitude_count"] = count
+        if count == 0:
+            band_rmse[name] = None
+            result[f"{name}_altitude_acceleration_rmse"] = None
+            if warn_empty:
+                warnings.warn(
+                    f"altitude band '{name}'={band} contains no evaluation samples; reporting null",
+                    RuntimeWarning,
+                    stacklevel=2,
+                )
+            continue
+        rmse = rmse_acceleration(pred_acceleration[mask], target_acceleration[mask])
+        band_rmse[name] = rmse
+        result[f"{name}_altitude_acceleration_rmse"] = rmse
+
+    low = band_rmse.get("low")
+    high = band_rmse.get("high")
+    if low is not None and high is not None and high > 0.0:
+        result["low_to_high_error_ratio"] = float(low / high)
+    else:
+        result["low_to_high_error_ratio"] = None
+    return result
 
 
 def altitude_binned_error(

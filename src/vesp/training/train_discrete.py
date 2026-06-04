@@ -11,6 +11,7 @@ from torch.utils.data import DataLoader
 
 from vesp.common.config import get_device, get_dtype, load_config as load_standard_config, merge_defaults, validate_config
 from vesp.data.dataset import ResidualGravityDataset, load_csv_dataset
+from vesp.training.acceptability import classify_run_acceptability
 from vesp.training.evaluate import evaluate_model, print_metrics, write_evaluation_artifacts
 from vesp.core.losses import composite_loss
 from vesp.core.models import DiscreteVESP, save_checkpoint
@@ -20,6 +21,7 @@ from vesp.data.splits import DataSplits, make_splits
 from vesp.data.synthetic import make_synthetic_dataset
 from vesp.data.target_scaling import (
     TargetScales,
+    altitude_row_weights,
     apply_target_scales_to_config,
     compute_target_scales,
     observation_row_weights,
@@ -135,6 +137,10 @@ def solve_ridge(
     target = bundle.target
 
     target_scales = target_scales or compute_target_scales(train_data, config)
+    # Altitude weighting (if enabled) is a solve-time row reweighting only; it never
+    # touches evaluation/metrics. The Adam path intentionally does not apply it —
+    # ridge is the real-lunar solver.
+    altitude_weights = altitude_row_weights(train_data.positions, config, dtype=operator.dtype)
     weights = observation_row_weights(
         n_query=train_data.positions.shape[0],
         include_potential=include_potential,
@@ -144,6 +150,7 @@ def solve_ridge(
         scales=target_scales,
         dtype=operator.dtype,
         device=device,
+        altitude_weights=altitude_weights,
     )
     operator = operator * weights.unsqueeze(-1)
     target = target * weights
@@ -247,47 +254,44 @@ def run(config: dict, *, model_cls=DiscreteVESP) -> dict:
 
     eval_cfg = config.get("evaluation", {})
     kernel_cfg = config.get("kernel", {})
+    diag_cfg = config.get("diagnostics", {})
+    shell_collapse_threshold = float(diag_cfg.get("shell_collapse_threshold", 0.90))
+    sigma_l2_warning_threshold = float(diag_cfg.get("sigma_l2_warning_threshold", 1.0))
+    altitude_bands = eval_cfg.get("altitude_bands")
     eval_softening = float(kernel_cfg.get("softening", kernel_cfg.get("eps", 0.0)))
     eval_acceleration_sign = float(kernel_cfg.get("acceleration_sign", 1.0))
-    metrics = evaluate_model(
-        model,
-        val_data,
-        batch_size=int(eval_cfg.get("batch_size", 4096)),
-        source_chunk_size=kernel_cfg.get("source_chunk_size"),
-        softening=eval_softening,
-        acceleration_sign=eval_acceleration_sign,
-        device=device,
-        n_altitude_bins=int(eval_cfg.get("n_altitude_bins", 6)),
-    )
-    if splits.test_high is not None and splits.test_high.positions.shape[0] > 0:
-        high_metrics = evaluate_model(
+
+    def _evaluate(data, *, bands):
+        return evaluate_model(
             model,
-            splits.test_high,
+            data,
             batch_size=int(eval_cfg.get("batch_size", 4096)),
             source_chunk_size=kernel_cfg.get("source_chunk_size"),
             softening=eval_softening,
             acceleration_sign=eval_acceleration_sign,
             device=device,
             n_altitude_bins=int(eval_cfg.get("n_altitude_bins", 6)),
+            altitude_bands=bands,
+            shell_collapse_threshold=shell_collapse_threshold,
+            sigma_l2_warning_threshold=sigma_l2_warning_threshold,
         )
+
+    metrics = _evaluate(val_data, bands=altitude_bands)
+    if splits.test_high is not None and splits.test_high.positions.shape[0] > 0:
+        # OOD subsets only span one band; skip band computation to avoid empty-band noise.
+        high_metrics = _evaluate(splits.test_high, bands={})
         metrics["test_high_acceleration_rmse"] = high_metrics["acceleration_rmse"]
         metrics["test_high_potential_rmse"] = high_metrics["potential_rmse"]
     if splits.test_low is not None and splits.test_low.positions.shape[0] > 0:
-        low_metrics = evaluate_model(
-            model,
-            splits.test_low,
-            batch_size=int(eval_cfg.get("batch_size", 4096)),
-            source_chunk_size=kernel_cfg.get("source_chunk_size"),
-            softening=eval_softening,
-            acceleration_sign=eval_acceleration_sign,
-            device=device,
-            n_altitude_bins=int(eval_cfg.get("n_altitude_bins", 6)),
-        )
+        low_metrics = _evaluate(splits.test_low, bands={})
         metrics["test_low_acceleration_rmse"] = low_metrics["acceleration_rmse"]
         metrics["test_low_potential_rmse"] = low_metrics["potential_rmse"]
     metrics["metrics_units"] = "raw target units"
     metrics["training_loss_units"] = "target-normalized" if target_scales.normalize_targets else "raw target units"
     metrics["acceleration_sign"] = eval_acceleration_sign
+
+    acceptability = classify_run_acceptability(metrics, metrics.get("diagnostics", {}), config)
+    metrics.update(acceptability)
 
     output_cfg = config.get("output", {})
     output_dir = Path(output_cfg.get("output_dir", config.get("output_dir", "outputs")))

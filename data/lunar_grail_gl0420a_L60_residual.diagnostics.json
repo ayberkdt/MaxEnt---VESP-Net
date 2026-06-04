@@ -1,0 +1,16 @@
+{
+  "acceleration_output": "physical",
+  "acceleration_rms": 3.499309378745561e-07,
+  "acceleration_units": "km/s^2",
+  "degree_max": 60,
+  "degree_min": 2,
+  "finite_difference_step": 0.0001,
+  "gm_km3_s2": 4902.80012616,
+  "n_query": 1024,
+  "position_norm_max": 1.5996630874709727,
+  "position_norm_min": 1.030366113108928,
+  "potential_rms": 0.00015835722868565185,
+  "radius_max": 1.6,
+  "radius_min": 1.03,
+  "reference_radius_km": 1738.0
+}

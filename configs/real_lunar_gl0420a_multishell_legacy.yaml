@@ -1,12 +1,7 @@
-# Conservative multi-shell real lunar default (post-hardening).
-# Rationale:
-#   - shell_alphas [0.70, 0.86, 0.95] include shells nearer the surface for the
-#     dominant low-altitude residual components (drops the deep 0.50 shell that
-#     attracted the collapse).
-#   - lambda_l2 = 1e-5 is a safer starting point against sigma_l2 inflation.
-#   - shell_energy_weights = 1e-5 (all shells) suppresses shell-energy collapse
-#     far more strongly than the legacy 1e-8.
-# The legacy setup is preserved in real_lunar_gl0420a_multishell_legacy.yaml.
+# Legacy / baseline multi-shell real lunar config (pre-hardening).
+# Kept for comparison: these settings did NOT prevent shell-energy collapse onto
+# the innermost shell and let sigma_l2 inflate. See real_lunar_gl0420a_multishell.yaml
+# for the conservative default.
 seed: 42
 device: cpu
 dtype: float64
@@ -28,7 +23,7 @@ data:
 
 model:
   type: multishell
-  shell_alphas: [0.70, 0.86, 0.95]
+  shell_alphas: [0.50, 0.78, 0.86]
   n_sources_per_shell: [384, 512, 384]
   weight_mode: surface_area
 
@@ -40,7 +35,7 @@ kernel:
 solver:
   type: ridge
   ridge_method: augmented_lstsq
-  lambda_l2: 1.0e-5
+  lambda_l2: 1.0e-7
   column_normalize: true
 
 loss:
@@ -51,10 +46,10 @@ loss:
   acceleration_scale: auto
   lambda_potential: 0.2
   lambda_acceleration: 1.0
-  lambda_l2: 1.0e-5
-  lambda_moment: 1.0e-4
+  lambda_l2: 1.0e-7
+  lambda_moment: 1.0e-5
   lambda_dipole: 1.0
-  shell_energy_weights: [1.0e-5, 1.0e-5, 1.0e-5]
+  shell_energy_weights: [1.0e-8, 1.0e-8, 5.0e-8]
 
 split:
   type: random
@@ -67,5 +62,5 @@ evaluation:
 
 output:
   output_dir: outputs
-  run_name: real_lunar_gl0420a_multishell
+  run_name: real_lunar_gl0420a_multishell_legacy
   save_plots: false

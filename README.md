@@ -259,6 +259,47 @@ ablation_results.csv
 ablation_summary.md
 ```
 
+## Interpreting Real Lunar Results
+
+The first real lunar runs (`real_lunar_gl0420a*`) showed:
+
+- high-altitude extrapolation is comparatively stable,
+- low-altitude error dominates the error budget,
+- unconstrained multi-shell fits can reduce RMSE but may collapse shell energy onto
+  the innermost shell and inflate the source norm (`sigma_l2`).
+
+Every run now self-diagnoses these failure modes. `summary.txt` / `metrics.json` /
+`diagnostics.json` report low/mid/high altitude band RMSE and the
+`low_to_high_error_ratio`, the shell-energy collapse metrics
+(`dominant_shell_energy_fraction`, `shell_energy_entropy`, `shell_collapse_flag`),
+the sigma-norm warning, and a single `acceptability_status`
+(`GOOD | CONDITIONAL | REJECT_REGULARIZATION | REJECT_LOW_ALTITUDE |
+REJECT_SOURCE_COLLAPSE | REJECT_NUMERICAL`). The status is a fast triage flag, **not**
+a scientific decision.
+
+Before considering Stage 3 MaxEnt, run the deterministic ablations (each supports a
+fast `quick` mode and an exhaustive `--mode full`):
+
+```powershell
+python -m vesp.training.run_ablation --config configs/ablation_real_lunar_regularization.yaml
+python -m vesp.training.run_ablation --config configs/ablation_real_lunar_shells.yaml
+python -m vesp.training.run_ablation --config configs/ablation_real_lunar_lowalt_weighting.yaml
+```
+
+Optional low-altitude weighted training (boosts low-altitude rows in the solve only;
+reported metrics stay in raw units):
+
+```powershell
+python -m vesp.training.train --config configs/real_lunar_gl0420a_lowalt_weighted.yaml
+python -m vesp.training.train --config configs/real_lunar_gl0420a_multishell_lowalt_weighted.yaml
+```
+
+If the best **non-collapsed** deterministic run still has unacceptable low-altitude
+error or source concentration, proceed to **Stage 3A: Discrete MaxEnt regularization**.
+Do not jump directly to neural density. The default
+`real_lunar_gl0420a_multishell.yaml` now ships conservative shells/regularization; the
+prior settings are preserved as `real_lunar_gl0420a_multishell_legacy.yaml`.
+
 ## End-of-Day Feasibility Suite
 
 Run the compact decision suite:

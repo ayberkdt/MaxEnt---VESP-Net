@@ -99,6 +99,33 @@ def apply_target_scales_to_config(config: dict, scales: TargetScales) -> None:
     loss_cfg["resolved_acceleration_source"] = scales.acceleration_source
 
 
+def altitude_row_weights(
+    positions: torch.Tensor,
+    config: dict,
+    *,
+    dtype: torch.dtype | None = None,
+) -> torch.Tensor | None:
+    """Per-query altitude weight (length n_query) or ``None`` when disabled.
+
+    Low-altitude rows are boosted so the ridge least-squares objective pays more
+    attention to the dominant low-altitude error band. The weight is
+    ``sqrt(boost)`` because least squares squares the row weight, so the effective
+    objective weight is ``boost``. The same per-query weight is applied to the
+    potential row and all three acceleration rows of that query downstream.
+    """
+
+    cfg = (config.get("loss", {}) or {}).get("altitude_weighting", {}) or {}
+    if not bool(cfg.get("enabled", False)):
+        return None
+    dtype = dtype or positions.dtype
+    radii = torch.linalg.norm(positions, dim=-1)
+    r_threshold = float(cfg.get("r_threshold", 1.15))
+    boost = float(cfg.get("boost", 1.0))
+    weights = torch.ones(radii.shape[0], dtype=dtype, device=positions.device)
+    weights = torch.where(radii < r_threshold, weights * math.sqrt(boost), weights)
+    return weights
+
+
 def observation_row_weights(
     *,
     n_query: int,
@@ -109,18 +136,26 @@ def observation_row_weights(
     scales: TargetScales,
     dtype: torch.dtype,
     device: torch.device | str,
+    altitude_weights: torch.Tensor | None = None,
 ) -> torch.Tensor:
+    if altitude_weights is not None:
+        if altitude_weights.shape[0] != n_query:
+            raise ValueError("altitude_weights must have length n_query")
+        altitude_weights = altitude_weights.to(dtype=dtype, device=device)
+    else:
+        altitude_weights = torch.ones(n_query, dtype=dtype, device=device)
+
     blocks: list[torch.Tensor] = []
     if include_potential:
         factor = math.sqrt(float(lambda_potential))
         if scales.normalize_targets:
             factor /= scales.potential_scale
-        blocks.append(torch.full((n_query,), factor, dtype=dtype, device=device))
+        blocks.append(factor * altitude_weights)
     if include_acceleration:
         factor = math.sqrt(float(lambda_acceleration))
         if scales.normalize_targets:
             factor /= scales.acceleration_scale
-        blocks.extend([torch.full((n_query,), factor, dtype=dtype, device=device) for _ in range(3)])
+        blocks.extend([factor * altitude_weights for _ in range(3)])
     if not blocks:
         raise ValueError("at least one target block is required for row weighting")
     return torch.cat(blocks, dim=0)

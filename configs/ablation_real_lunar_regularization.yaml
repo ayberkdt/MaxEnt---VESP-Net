@@ -1,0 +1,81 @@
+# Regularization ablation for the conservative multi-shell real lunar fit.
+# quick: 4 hand-picked (lambda_l2, shell_energy) points for a fast decision.
+# full : cartesian grid over lambda_l2 x shell_energy_weight x lambda_moment (60 runs).
+# Run quick:  python -m vesp.training.run_ablation --config configs/ablation_real_lunar_regularization.yaml
+# Run full :  python -m vesp.training.run_ablation --config configs/ablation_real_lunar_regularization.yaml --mode full
+ablation:
+  mode: quick
+  output_dir: outputs/ablation_real_lunar_regularization
+
+base_config:
+  seed: 42
+  device: cpu
+  dtype: float64
+  body:
+    R_body: 1.0
+    normalize_positions: true
+    physical_R_body: 1738.0
+    physical_R_body_units: km
+    position_units: normalized
+    potential_units: km^2/s^2
+    acceleration_units: km/s^2
+  data:
+    type: csv
+    path: data/lunar_grail_gl0420a_L60_residual.csv
+    train_fraction: 0.8
+    seed: 42
+  model:
+    type: multishell
+    shell_alphas: [0.70, 0.86, 0.95]
+    n_sources_per_shell: [384, 512, 384]
+    weight_mode: surface_area
+  kernel:
+    eps: 0.0
+    acceleration_sign: 1.0
+    source_chunk_size: 1024
+  solver:
+    type: ridge
+    ridge_method: augmented_lstsq
+    lambda_l2: 1.0e-5
+    column_normalize: true
+  loss:
+    use_potential: true
+    use_acceleration: true
+    normalize_targets: true
+    potential_scale: auto
+    acceleration_scale: auto
+    lambda_potential: 0.2
+    lambda_acceleration: 1.0
+    lambda_l2: 1.0e-5
+    lambda_moment: 1.0e-4
+    lambda_dipole: 1.0
+    shell_energy_weights: 1.0e-5
+  split:
+    type: random
+    radius_units: normalized
+    train_fraction: 0.8
+  evaluation:
+    batch_size: 4096
+    n_altitude_bins: 6
+  output:
+    output_dir: outputs/ablation_real_lunar_regularization
+
+quick:
+  - name: regA_l2_1em6_sew_1em6
+    loss.lambda_l2: 1.0e-6
+    loss.shell_energy_weights: 1.0e-6
+  - name: regB_l2_1em5_sew_1em5
+    loss.lambda_l2: 1.0e-5
+    loss.shell_energy_weights: 1.0e-5
+  - name: regC_l2_1em4_sew_1em5
+    loss.lambda_l2: 1.0e-4
+    loss.shell_energy_weights: 1.0e-5
+  - name: regD_l2_1em5_sew_1em4
+    loss.lambda_l2: 1.0e-5
+    loss.shell_energy_weights: 1.0e-4
+
+full:
+  grid:
+    loss.lambda_l2: [1.0e-7, 1.0e-6, 1.0e-5, 1.0e-4]
+    loss.shell_energy_weights: [0, 1.0e-7, 1.0e-6, 1.0e-5, 1.0e-4]
+    loss.lambda_moment: [1.0e-6, 1.0e-5, 1.0e-4]

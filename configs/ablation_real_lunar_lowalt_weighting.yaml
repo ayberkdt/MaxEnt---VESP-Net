@@ -1,0 +1,76 @@
+# Low-altitude weighting ablation for the real lunar single-shell fit.
+# Sweeps the low-altitude boost factor; boost=1.0 is the unweighted baseline.
+# Run:  python -m vesp.training.run_ablation --config configs/ablation_real_lunar_lowalt_weighting.yaml [--mode full]
+ablation:
+  mode: quick
+  output_dir: outputs/ablation_real_lunar_lowalt_weighting
+
+base_config:
+  seed: 42
+  device: cpu
+  dtype: float64
+  body:
+    R_body: 1.0
+    normalize_positions: true
+    physical_R_body: 1738.0
+    physical_R_body_units: km
+    position_units: normalized
+    potential_units: km^2/s^2
+    acceleration_units: km/s^2
+  data:
+    type: csv
+    path: data/lunar_grail_gl0420a_L60_residual.csv
+    train_fraction: 0.8
+    seed: 42
+  model:
+    type: discrete
+    shell_alpha: 0.86
+    n_source: 1024
+    weight_mode: surface_area
+  kernel:
+    eps: 0.0
+    acceleration_sign: 1.0
+    source_chunk_size: 1024
+  solver:
+    type: ridge
+    ridge_method: augmented_lstsq
+    lambda_l2: 1.0e-6
+    column_normalize: true
+  loss:
+    use_potential: true
+    use_acceleration: true
+    normalize_targets: true
+    potential_scale: auto
+    acceleration_scale: auto
+    lambda_potential: 0.2
+    lambda_acceleration: 1.0
+    lambda_l2: 1.0e-6
+    lambda_moment: 1.0e-4
+    lambda_dipole: 1.0
+    shell_energy_weights: []
+    altitude_weighting:
+      enabled: true
+      mode: low_altitude_boost
+      r_threshold: 1.15
+      boost: 1.0
+  split:
+    type: random
+    radius_units: normalized
+    train_fraction: 0.8
+  evaluation:
+    batch_size: 4096
+    n_altitude_bins: 6
+  output:
+    output_dir: outputs/ablation_real_lunar_lowalt_weighting
+
+quick:
+  - name: boost1_baseline
+    loss.altitude_weighting.boost: 1.0
+  - name: boost3
+    loss.altitude_weighting.boost: 3.0
+  - name: boost5
+    loss.altitude_weighting.boost: 5.0
+
+full:
+  grid:
+    loss.altitude_weighting.boost: [1.0, 2.0, 3.0, 5.0]

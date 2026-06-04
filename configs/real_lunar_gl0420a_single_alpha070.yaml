@@ -1,12 +1,5 @@
-# Conservative multi-shell real lunar default (post-hardening).
-# Rationale:
-#   - shell_alphas [0.70, 0.86, 0.95] include shells nearer the surface for the
-#     dominant low-altitude residual components (drops the deep 0.50 shell that
-#     attracted the collapse).
-#   - lambda_l2 = 1e-5 is a safer starting point against sigma_l2 inflation.
-#   - shell_energy_weights = 1e-5 (all shells) suppresses shell-energy collapse
-#     far more strongly than the legacy 1e-8.
-# The legacy setup is preserved in real_lunar_gl0420a_multishell_legacy.yaml.
+# Single-shell real lunar, source shell radius alpha = 0.70 (alpha sweep member).
+# Sweep purpose: see how low-altitude error moves with source shell radius.
 seed: 42
 device: cpu
 dtype: float64
@@ -27,9 +20,9 @@ data:
   seed: 42
 
 model:
-  type: multishell
-  shell_alphas: [0.70, 0.86, 0.95]
-  n_sources_per_shell: [384, 512, 384]
+  type: discrete
+  shell_alpha: 0.70
+  n_source: 1024
   weight_mode: surface_area
 
 kernel:
@@ -40,7 +33,7 @@ kernel:
 solver:
   type: ridge
   ridge_method: augmented_lstsq
-  lambda_l2: 1.0e-5
+  lambda_l2: 1.0e-6
   column_normalize: true
 
 loss:
@@ -51,10 +44,10 @@ loss:
   acceleration_scale: auto
   lambda_potential: 0.2
   lambda_acceleration: 1.0
-  lambda_l2: 1.0e-5
+  lambda_l2: 1.0e-6
   lambda_moment: 1.0e-4
   lambda_dipole: 1.0
-  shell_energy_weights: [1.0e-5, 1.0e-5, 1.0e-5]
+  shell_energy_weights: []
 
 split:
   type: random
@@ -67,5 +60,5 @@ evaluation:
 
 output:
   output_dir: outputs
-  run_name: real_lunar_gl0420a_multishell
+  run_name: real_lunar_gl0420a_single_alpha070
   save_plots: false

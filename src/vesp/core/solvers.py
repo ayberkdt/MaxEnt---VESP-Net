@@ -24,14 +24,36 @@ class RidgeSolveConfig:
             solver_cfg = {"type": solver_cfg}
         loss_cfg = config.get("loss", {})
         train_cfg = config.get("training", {})
+        sew = loss_cfg.get("shell_energy_weights", [])
+        sew = list(sew) if isinstance(sew, (list, tuple)) else [sew]
         return cls(
             method=str(train_cfg.get("ridge_method", solver_cfg.get("ridge_method", "augmented_lstsq"))).lower(),
             lambda_l2=float(loss_cfg.get("lambda_l2", solver_cfg.get("lambda_l2", 0.0))),
             column_normalize=bool(solver_cfg.get("column_normalize", train_cfg.get("column_normalize", True))),
             lambda_moment=float(loss_cfg.get("lambda_moment", 0.0)),
             lambda_dipole=float(loss_cfg.get("lambda_dipole", 1.0)),
-            shell_energy_weights=list(loss_cfg.get("shell_energy_weights", [])),
+            shell_energy_weights=sew,
         )
+
+
+def broadcast_shell_energy_weights(weights, n_shells: int) -> list[float]:
+    """Broadcast a scalar / length-1 shell-energy weight to ``n_shells`` shells.
+
+    Lets ablation configs use a single ``shell_energy_weights`` value regardless of
+    how many shells the trial model has (e.g. a 4-shell set). An empty value means
+    "no shell-energy regularization" and is preserved as empty.
+    """
+
+    if weights is None:
+        return []
+    if not isinstance(weights, (list, tuple)):
+        weights = [weights]
+    weights = list(weights)
+    if not weights:
+        return []
+    if len(weights) == 1 and n_shells > 1:
+        return [float(weights[0])] * n_shells
+    return [float(w) for w in weights]
 
 
 def build_regularization_rows(
@@ -89,7 +111,12 @@ def solve_discrete_ridge(
     regularization, column normalization, and the concrete linear solver.
     """
 
-    shell_weights = torch.as_tensor(config.shell_energy_weights, dtype=operator.dtype, device=operator.device)
+    n_shells = int(shell_ids.max().item()) + 1 if shell_ids.numel() else 0
+    shell_weights = torch.as_tensor(
+        broadcast_shell_energy_weights(config.shell_energy_weights, n_shells),
+        dtype=operator.dtype,
+        device=operator.device,
+    )
     rows, targets = build_regularization_rows(
         source_positions=source_positions.to(device=operator.device, dtype=operator.dtype),
         source_weights=source_weights.to(device=operator.device, dtype=operator.dtype),
