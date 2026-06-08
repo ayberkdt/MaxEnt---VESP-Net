@@ -1,4 +1,4 @@
-# vesp-uq
+# VESP-UQ: Equivalent-Source Uncertainty Calibration for Lunar Gravity Surrogates
 
 Equivalent-source modeling of lunar residual gravity: a deterministic feasibility framework
 plus a surrogate-agnostic uncertainty / risk-calibration layer, sharing one core — interior
