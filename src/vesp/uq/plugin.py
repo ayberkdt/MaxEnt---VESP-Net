@@ -40,7 +40,11 @@ from vesp.extensions.probabilistic import (
     calibration_metrics,
 )
 from vesp.uq.metrics import vector_calibration_metrics
-from vesp.uq.trajectory import TrajectoryScore, score_sigma_profile
+from vesp.uq.trajectory import (
+    TrajectoryScore,
+    calibrate_risk_threshold as _calibrate_risk_threshold,
+    score_sigma_profile,
+)
 
 COVARIANCE_MODES = ("exact", "diagonal", "lowrank")
 
@@ -115,9 +119,13 @@ class VESPUQPlugin:
         low_altitude_radius: float = 1.15,
         risk_scoring: str = "max",
         sigma_threshold: float | None = None,
+        altitude_reference_h: float | None = None,
         domain_support: bool = False,
         domain_k: int = 8,
         domain_weight: float = 1.0,
+        domain_distance_weight: float = 1.0,
+        domain_radial_weight: float = 1.0,
+        domain_angular_weight: float = 0.0,
         dtype: torch.dtype = torch.float64,
         device: torch.device | str = "cpu",
         seed: int = 0,
@@ -144,9 +152,15 @@ class VESPUQPlugin:
         self.low_altitude_radius = float(low_altitude_radius)
         self.risk_scoring = risk_scoring
         self.sigma_threshold = sigma_threshold
+        self.altitude_reference_h = (
+            float(altitude_reference_h) if altitude_reference_h is not None else None
+        )
         self.domain_support = bool(domain_support)
         self.domain_k = int(domain_k)
         self.domain_weight = float(domain_weight)
+        self.domain_distance_weight = float(domain_distance_weight)
+        self.domain_radial_weight = float(domain_radial_weight)
+        self.domain_angular_weight = float(domain_angular_weight)
         self.seed = int(seed)
 
         self.posterior: LinearGaussianPosterior | None = None
@@ -160,6 +174,7 @@ class VESPUQPlugin:
         self.val_radii: torch.Tensor | None = None
         self._domain_scale: float | None = None
         self._domain_scale_k: int | None = None
+        self._domain_angular_scale: float | None = None
 
     # ------------------------------------------------------------------ construction
     @classmethod
@@ -211,9 +226,15 @@ class VESPUQPlugin:
             low_altitude_radius=float(risk.get("low_altitude_radius", low_band[1])),
             risk_scoring=str(risk.get("scoring", "max")).lower(),
             sigma_threshold=risk.get("sigma_threshold"),
+            altitude_reference_h=(
+                float(risk["altitude_reference_h"]) if risk.get("altitude_reference_h") is not None else None
+            ),
             domain_support=bool(risk.get("domain_support", False)),
             domain_k=int(risk.get("domain_k", 8)),
             domain_weight=float(risk.get("domain_weight", 1.0)),
+            domain_distance_weight=float(risk.get("domain_distance_weight", 1.0)),
+            domain_radial_weight=float(risk.get("domain_radial_weight", 1.0)),
+            domain_angular_weight=float(risk.get("domain_angular_weight", 0.0)),
             dtype=dtype,
             device=device,
             seed=int(config.get("seed", 0)),
@@ -355,6 +376,7 @@ class VESPUQPlugin:
             self.val_radii = None
         self._domain_scale = None  # invalidate any cached nearest-neighbour scale
         self._domain_scale_k = None
+        self._domain_angular_scale = None
 
         operator = self._operator(train_pos)
         target = _flatten_acc(train_err)
@@ -402,7 +424,15 @@ class VESPUQPlugin:
             "noise_model": self.noise_model,
             "covariance_mode": self.covariance_mode,
             "n_sources": int(self.sources.n_sources),
+            "domain_support_enabled": self.domain_support,
+            "domain_k": self.domain_k,
+            "domain_weight": self.domain_weight,
+            "train_radius_min": float(self.train_radii.min()),
+            "train_radius_max": float(self.train_radii.max()),
         }
+        if self.domain_support:
+            # the nearest-neighbour scale is otherwise lazy; materialize it for the report
+            self.fit_info["domain_scale"] = self._domain_nn_scale(self.domain_k)
         if self.altitude_noise is not None:
             self.fit_info["altitude_noise_a"] = self.altitude_noise.a
             self.fit_info["altitude_noise_b"] = self.altitude_noise.b
@@ -553,17 +583,55 @@ class VESPUQPlugin:
         self._domain_scale, self._domain_scale_k = scale, k
         return scale
 
-    def domain_support_score(self, positions, k: int | None = None, *, chunk: int = 1024) -> torch.Tensor:
-        """Per-position domain-support (out-of-support) score for query ``positions`` ``(N, 3)``.
+    def _unit_directions(self, x: torch.Tensor) -> torch.Tensor:
+        """Row-normalize positions to unit direction vectors (for the angular component)."""
 
-        Returns a nonnegative tensor where ``0`` means well inside the calibration support and
-        values ``> 1`` mean increasingly extrapolated. It combines two robust signals:
+        r = torch.linalg.norm(x, dim=-1, keepdim=True).clamp_min(torch.finfo(self.dtype).tiny)
+        return x / r
 
-        - a **distance** term ``(d_k / scale - 1)+``, where ``d_k`` is the query's ``k``-th
-          nearest training-point distance and ``scale`` is the median training ``k``-NN spacing;
-        - a **radius extrapolation** term that grows once the query radius falls below the
-          minimum or rises above the maximum training radius (normalized by the same scale).
+    def _domain_angular_nn_scale(self, k: int, *, subset: int = 512) -> float:
+        """Robust angular spacing: median ``k``-th nearest training-direction angle (radians)."""
 
+        if self._domain_angular_scale is not None:
+            return self._domain_angular_scale
+        train = self.train_positions
+        n = int(train.shape[0])
+        if n < 2:
+            scale = 1.0
+        else:
+            u = self._unit_directions(train)
+            g = torch.Generator().manual_seed(self.seed + 1)
+            sub = u[torch.randperm(n, generator=g)[: min(subset, n)]]
+            kk = min(k + 1, n)  # +1 to drop the self-pair (angle 0)
+            ang = torch.empty(sub.shape[0], dtype=self.dtype, device=self.device)
+            for start in range(0, sub.shape[0], 1024):
+                cos = (sub[start : start + 1024] @ u.transpose(0, 1)).clamp(-1.0, 1.0)
+                kth_cos = torch.topk(cos, kk, largest=True).values[:, -1]
+                ang[start : start + 1024] = torch.arccos(kth_cos)
+            scale = float(torch.median(ang))
+        scale = max(scale, 1.0e-9)
+        self._domain_angular_scale = scale
+        return scale
+
+    def domain_support_components(
+        self, positions, k: int | None = None, *, chunk: int = 1024
+    ) -> dict[str, torch.Tensor]:
+        """Decomposed per-position domain-support score for query ``positions`` ``(N, 3)``.
+
+        Returns the (already weight-applied, nonnegative) contributions plus their sum:
+
+        - ``distance_score``: ``domain_distance_weight * (d_k / scale - 1)+`` -- the query's
+          ``k``-th nearest training-point Euclidean distance vs the median training ``k``-NN
+          spacing. This already captures *angular* out-of-support (a same-radius query far from
+          the training directions has a large Euclidean nearest distance).
+        - ``radius_penalty``: ``domain_radial_weight * (radius extrapolation below r_min / above
+          r_max) / scale`` -- the purely radial out-of-support term.
+        - ``angular_score``: ``domain_angular_weight * (theta_k / angular_scale - 1)+`` -- an
+          OPTIONAL nearest-direction angular term (off by default; the distance term usually
+          suffices). Zeros unless ``domain_angular_weight > 0``.
+        - ``total_score``: the sum of the three (so the components always sum to the total).
+
+        ``0`` means well inside the calibration support; ``> 1`` means increasingly extrapolated.
         Chunked over queries so it stays cheap even for large ensembles.
         """
 
@@ -573,14 +641,25 @@ class VESPUQPlugin:
         pos = self._prep_positions(positions)
         train = self.train_positions
         n_train = int(train.shape[0])
+        n_q = int(pos.shape[0])
         k_eff = max(1, min(k, n_train))
         scale = self._domain_nn_scale(k)
 
-        knn = torch.empty(pos.shape[0], dtype=self.dtype, device=self.device)
-        for start in range(0, pos.shape[0], chunk):
+        want_angular = self.domain_angular_weight > 0.0
+        knn = torch.empty(n_q, dtype=self.dtype, device=self.device)
+        ang_nn = torch.empty(n_q, dtype=self.dtype, device=self.device) if want_angular else None
+        if want_angular:
+            u_train = self._unit_directions(train)
+            u_q = self._unit_directions(pos)
+        for start in range(0, n_q, chunk):
             d = torch.cdist(pos[start : start + chunk], train)
             knn[start : start + chunk] = torch.topk(d, k_eff, largest=False).values[:, -1]
-        dist_score = (knn / scale - 1.0).clamp_min(0.0)
+            if want_angular:
+                cos = (u_q[start : start + chunk] @ u_train.transpose(0, 1)).clamp(-1.0, 1.0)
+                kth_cos = torch.topk(cos, k_eff, largest=True).values[:, -1]
+                ang_nn[start : start + chunk] = torch.arccos(kth_cos)
+
+        distance_score = (knn / scale - 1.0).clamp_min(0.0)
 
         radius = torch.linalg.norm(pos, dim=-1)
         r_min = float(self.train_radii.min())
@@ -588,7 +667,26 @@ class VESPUQPlugin:
         below = (r_min - radius).clamp_min(0.0)
         above = (radius - r_max).clamp_min(0.0)
         radius_penalty = (below + above) / scale
-        return (dist_score + radius_penalty).clamp_min(0.0)
+
+        if want_angular:
+            angular_score = (ang_nn / self._domain_angular_nn_scale(k) - 1.0).clamp_min(0.0)
+        else:
+            angular_score = torch.zeros(n_q, dtype=self.dtype, device=self.device)
+
+        d_c = (self.domain_distance_weight * distance_score).clamp_min(0.0)
+        r_c = (self.domain_radial_weight * radius_penalty).clamp_min(0.0)
+        a_c = (self.domain_angular_weight * angular_score).clamp_min(0.0)
+        return {
+            "distance_score": d_c,
+            "radius_penalty": r_c,
+            "angular_score": a_c,
+            "total_score": (d_c + r_c + a_c).clamp_min(0.0),
+        }
+
+    def domain_support_score(self, positions, k: int | None = None, *, chunk: int = 1024) -> torch.Tensor:
+        """Total per-position domain-support score (sum of :meth:`domain_support_components`)."""
+
+        return self.domain_support_components(positions, k=k, chunk=chunk)["total_score"]
 
     # ------------------------------------------------------------------ trajectory scoring
     def score_trajectory(
@@ -610,6 +708,7 @@ class VESPUQPlugin:
             scoring=scoring or self.risk_scoring,
             sigma_threshold=self.sigma_threshold,
             low_altitude_radius=self.low_altitude_radius,
+            altitude_reference_h=self.altitude_reference_h,
             epistemic_sigma=pred.epistemic_sigma,
             expected_error=pred.expected_error,
             mean_error_magnitude=pred.mean_error_magnitude,
@@ -638,6 +737,40 @@ class VESPUQPlugin:
             self.score_trajectory(t, scoring=scoring, weights=w)
             for t, w in zip(traj_list, weight_list)
         ]
+
+    # ------------------------------------------------------------------ threshold calibration
+    def calibrate_risk_threshold(
+        self,
+        positions=None,
+        *,
+        scoring: str = "expected_abs_p95",
+        quantile: float = 0.95,
+        multiplier: float = 1.0,
+        trajectories=None,
+    ) -> float:
+        """Derive an absolute risk threshold from held-out calibration data.
+
+        Two calibration sources (provide one):
+
+        - ``positions`` (a held-out point cloud): the threshold is the ``quantile`` of the
+          per-point ``expected_error`` -- an absolute force-error budget for the ``expected_abs``
+          / ``supervisor_abs`` thresholding path.
+        - ``trajectories`` (held-out calibration orbits): they are scored with ``scoring`` and the
+          threshold is the ``quantile`` of the resulting per-trajectory risk.
+
+        Pair the result with ``select_reruns(threshold=...)`` so a lower-risk test set can
+        legitimately raise zero alarms.
+        """
+
+        self._require_fitted()
+        if (positions is None) == (trajectories is None):
+            raise ValueError("provide exactly one of positions or trajectories")
+        if trajectories is not None:
+            scores = self.score_ensemble(trajectories, scoring=scoring)
+            values = torch.tensor([s.risk_score for s in scores], dtype=torch.float64)
+        else:
+            values = self.predict_uncertainty(positions).expected_error
+        return _calibrate_risk_threshold(values, quantile=quantile, multiplier=multiplier)
 
     # ------------------------------------------------------------------ calibration report
     def evaluate_calibration(self, positions, error, *, altitude_bands: dict | None = None) -> dict:

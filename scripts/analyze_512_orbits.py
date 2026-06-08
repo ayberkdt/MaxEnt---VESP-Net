@@ -104,55 +104,71 @@ def main():
         traj_tensors.append(pos_tensor)
         true_errors.append(st_lrps_metrics.loc[i, 'rms_pos_err_km'])
         
-    # Use the supervisor scoring configured in the YAML (expected error * altitude * domain).
-    scoring = str(cfg.get("uq", {}).get("risk", {}).get("scoring", "supervisor")).lower()
-    print(f"Scoring the 512 accurate trajectories (scoring={scoring})...")
+    n = len(scenarios)
+    true_err_t = torch.tensor([float(e) for e in true_errors], dtype=torch.float64)
 
-    # (a) Relative ranking: flag the top decile and measure how well risk ranks the true error.
-    results = run_risk_screening(plugin, traj_tensors, rerun_fraction=0.10, scoring=scoring, true_error=true_errors)
+    print("\n==================================================================")
+    print("  VESP-UQ FORCE-RISK vs ST-LRPS POSITION-ERROR DIAGNOSTIC (512 orbits)")
+    print("==================================================================")
+    print("WARNING: this is NOT a direct trajectory-error predictor benchmark.")
+    print("VESP-UQ scores expected FORCE-model error / out-of-support risk. This diagnostic")
+    print("only asks whether that force-risk happens to co-rank the ST-LRPS *position* error;")
+    print("a low correlation is expected when position error is not force-error driven.\n")
+
+    # ---- (a) RELATIVE ranking mode: prioritize which orbits to rerun first ----
+    rerun_fraction = 0.10
+    results = run_risk_screening(
+        plugin, traj_tensors, rerun_fraction=rerun_fraction,
+        scoring="supervisor_rel_p95", true_error=true_errors,
+    )
     report = results["risk_screening_report"]
     scores = results["trajectory_scores"]
-    risk_scores = torch.tensor([s.risk_score for s in scores], dtype=torch.float64)
 
-    print("\n--- 512 LUNAR SCENARIOS RISK SCREENING REPORT ---")
-    print(f"Total Trajectories: {len(scenarios)}")
-    print(f"Spearman Rank Correlation (Risk vs True Error): {report.spearman_risk_vs_error:.4f}")
-    print(f"Capture Rate (Top 10% Risk catching Top 10% Error): {report.capture_rate*100:.1f}%")
+    print(f"--- (a) RELATIVE RANKING (scoring=supervisor_rel_p95, top {rerun_fraction:.0%}) ---")
+    print(f"Total Trajectories: {n}")
+    print(f"Spearman (force-risk vs ST-LRPS position error): {report.spearman_risk_vs_error:.4f}")
+    print(f"Capture Rate (top-risk catching top-{rerun_fraction:.0%} error): {report.capture_rate*100:.1f}%")
     print(f"Precision: {report.precision*100:.1f}%")
-    if report.rerun_fraction > 0:
-        print(f"Lift over random (capture / rerun fraction): {report.capture_rate / report.rerun_fraction:.2f}x")
+    lift = report.capture_rate / report.rerun_fraction if report.rerun_fraction > 0 else float("nan")
+    print(f"Lift over random (capture / rerun fraction): {lift:.2f}x")
+    print(f"Mean true error  flagged: {report.mean_error_flagged:.3f} km  vs  "
+          f"accepted: {report.mean_error_accepted:.3f} km  (ratio {report.error_ratio_flagged_to_accepted:.2f}x)")
 
-    print(f"\nMean True Error of Flagged (Top 10% Riskiest): {report.mean_error_flagged:.3f} km")
-    print(f"Mean True Error of Accepted (Remaining 90%):   {report.mean_error_accepted:.3f} km")
-    print(f"Ratio (Flagged Error / Accepted Error): {report.error_ratio_flagged_to_accepted:.2f}x")
-
-    ee_mean = float(np.mean([s.mean_expected_error for s in scores]))
-    ee_max = float(np.max([s.max_expected_error for s in scores]))
-    print(f"\nExpected error per orbit (ensemble): mean={ee_mean:.3e}  max={ee_max:.3e} (normalized accel units)")
+    # random baseline: 100 random top-k masks -> mean/std capture rate (~rerun_fraction)
+    k = int(np.ceil(rerun_fraction * n))
+    high_thr = float(torch.quantile(true_err_t, 0.90))
+    truly_high = true_err_t >= high_thr
+    n_high = int(truly_high.sum())
+    g = torch.Generator().manual_seed(0)
+    rand_caps = []
+    for _ in range(100):
+        idx = torch.randperm(n, generator=g)[:k]
+        mask = torch.zeros(n, dtype=torch.bool)
+        mask[idx] = True
+        rand_caps.append(float((mask & truly_high).sum()) / max(1, n_high))
+    rand_caps = np.array(rand_caps)
+    print(f"Random baseline capture (100 masks): mean={rand_caps.mean()*100:.1f}% +/- {rand_caps.std()*100:.1f}%")
     if abs(report.spearman_risk_vs_error) < 0.1 or report.capture_rate <= report.rerun_fraction:
-        print("NOTE: on this set, VESP-UQ force-error risk does NOT rank the ST-LRPS position error")
-        print("      (|Spearman| < 0.1 / lift <= 1). VESP-UQ scores expected FORCE error, which is")
-        print("      not the dominant driver of this surrogate's position error here.")
+        print("NOTE: force-risk did NOT meaningfully rank ST-LRPS position error here (|Spearman|<0.1 /")
+        print("      lift<=1). This tests position-error ranking, not force-model OOD calibration;")
+        print("      it is not by itself evidence that the force-risk layer is miscalibrated.")
 
-    # (b) Absolute-threshold mode -- the supervisor is NOT forced to flag a fixed fraction. We
-    # use the cross-trajectory-comparable `expected` risk (mean expected FORCE error per orbit,
-    # in normalized accel units, no per-trajectory altitude normalization) so a single physical
-    # error budget means the same thing for every orbit. The operator picks the budget; here we
-    # just show how the flagged count moves with it -- including ZERO when the budget exceeds the
-    # worst orbit. We do NOT claim these 512 orbits are all benign (their expected force error
-    # spans ~100x; eccentric orbits do dip to genuinely low, high-error periapsis).
-    expected_scores = plugin.score_ensemble(traj_tensors, scoring="expected")
-    expected_risk = torch.tensor([s.risk_score for s in expected_scores], dtype=torch.float64)
-    pct = {q: float(torch.quantile(expected_risk, q)) for q in (0.50, 0.90, 0.99)}
-    rmax = float(expected_risk.max())
-    print("\n--- ABSOLUTE-THRESHOLD (PHYSICAL BUDGET) SCREENING ---")
+    # ---- (b) ABSOLUTE physical-budget mode: zero-alarm-capable screening ----
+    # `expected_abs_p95` is cross-trajectory comparable (fixed scale, no per-trajectory altitude
+    # normalization), so one physical force-error budget means the same for every orbit.
+    abs_scores = plugin.score_ensemble(traj_tensors, scoring="expected_abs_p95")
+    abs_risk = torch.tensor([s.risk_score for s in abs_scores], dtype=torch.float64)
+    pct = {q: float(torch.quantile(abs_risk, q)) for q in (0.50, 0.90, 0.99)}
+    rmax = float(abs_risk.max())
+    print("\n--- (b) ABSOLUTE PHYSICAL-BUDGET (scoring=expected_abs_p95) ---")
     print("Per-orbit expected force-error risk (normalized accel units):")
     print(f"  p50={pct[0.50]:.3e}  p90={pct[0.90]:.3e}  p99={pct[0.99]:.3e}  max={rmax:.3e}")
     for label, budget in (("above worst orbit", rmax * 1.01), ("p99 budget", pct[0.99]), ("p90 budget", pct[0.90])):
-        rep_b = select_reruns(expected_risk, threshold=budget)
+        rep_b = select_reruns(abs_risk, threshold=budget)
         tag = "ZERO ALARMS" if rep_b.n_flagged == 0 else f"{rep_b.n_flagged} flagged"
-        print(f"  budget={budget:.3e} ({label:>17}) -> {rep_b.n_above_threshold}/{len(scenarios)} above -> {tag}")
-    print("=> An absolute physical budget can yield zero alarms (unlike a fixed top-fraction).")
+        print(f"  budget={budget:.3e} ({label:>17}) -> {rep_b.n_above_threshold}/{n} above -> {tag}")
+    print("=> An absolute physical budget can yield zero alarms (unlike a fixed top-fraction),")
+    print("   but these 512 orbits are NOT all benign (expected force error spans ~100x).")
 
 if __name__ == '__main__':
     main()

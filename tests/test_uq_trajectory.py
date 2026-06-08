@@ -10,6 +10,7 @@ import torch
 from vesp.uq.trajectory import (
     RiskScreeningReport,
     aggregate_trajectory_error,
+    calibrate_risk_threshold,
     score_sigma_profile,
     select_reruns,
 )
@@ -257,3 +258,149 @@ def test_p95_aggregator_robust_to_spike_but_tracks_sustained_pass():
 def test_aggregate_trajectory_error_rejects_bad_mode():
     with pytest.raises(ValueError):
         aggregate_trajectory_error(torch.ones(4), "median")
+
+
+# ============================ Phase 2: robustness upgrades ============================
+
+# ---- P1: selection edge cases (ceil cap, topk fraction policy, ties) ----
+
+def test_threshold_plus_tiny_max_fraction_flags_at_least_one():
+    # n=40, only ceil(0.01*40)=1 budgeted, but 10 are above threshold -> flag exactly 1 (>=1)
+    risk = torch.cat([torch.zeros(30), torch.ones(10)]).to(torch.float64)
+    report = select_reruns(risk, threshold=0.5, max_rerun_fraction=0.01)
+    assert report.n_above_threshold == 10
+    assert report.n_flagged == 1
+    assert report.n_requested == 1
+
+
+def test_threshold_plus_max_fraction_flags_zero_when_none_above():
+    risk = torch.zeros(40, dtype=torch.float64)
+    report = select_reruns(risk, threshold=0.5, max_rerun_fraction=0.5)
+    assert report.n_above_threshold == 0
+    assert report.n_flagged == 0  # cap is 0 when nothing is above the threshold
+
+
+def test_fraction_topk_flags_exact_count_even_with_ties():
+    risk = torch.ones(40, dtype=torch.float64)  # everything ties
+    report = select_reruns(risk, rerun_fraction=0.2, fraction_policy="topk")
+    assert report.fraction_policy == "topk"
+    assert report.n_flagged == 8  # exactly ceil(0.2 * 40)
+    assert report.n_requested == 8
+    assert report.n_ties_at_cutoff == 40  # all 40 share the cutoff value
+
+
+def test_fraction_quantile_policy_over_flags_on_ties():
+    risk = torch.ones(40, dtype=torch.float64)
+    report = select_reruns(risk, rerun_fraction=0.2, fraction_policy="quantile")
+    # legacy quantile threshold == 1.0 -> risk >= 1.0 flags everything (the bug topk fixes)
+    assert report.fraction_policy == "quantile"
+    assert report.n_flagged == 40
+
+
+def test_fraction_default_policy_is_topk():
+    risk = torch.arange(100, dtype=torch.float64)
+    report = select_reruns(risk, rerun_fraction=0.2)
+    assert report.fraction_policy == "topk"
+    assert report.n_flagged == 20
+    assert min(report.flagged_indices) >= 80
+    assert report.requested_rerun_fraction == pytest.approx(0.2)
+
+
+def test_select_reruns_rejects_bad_fraction_policy():
+    with pytest.raises(ValueError):
+        select_reruns(torch.arange(10, dtype=torch.float64), rerun_fraction=0.2, fraction_policy="nope")
+
+
+# ---- P2: absolute vs relative supervisor modes ----
+
+def test_supervisor_abs_distinguishes_altitude_with_same_expected_error():
+    ee = torch.full((10,), 1.0)
+    sig = torch.full((10,), 0.01)
+    low = torch.full((10,), 1.05)  # h = 0.05
+    high = torch.full((10,), 1.50)  # h = 0.50
+    s_low = score_sigma_profile(sig, low, scoring="supervisor_abs", expected_error=ee)
+    s_high = score_sigma_profile(sig, high, scoring="supervisor_abs", expected_error=ee)
+    # absolute altitude weight (fixed reference) ranks the lower constant orbit higher
+    assert s_low.risk_score > s_high.risk_score
+    # relative supervisor CANNOT: per-trajectory median normalizes a constant orbit to weight 1
+    r_low = score_sigma_profile(sig, low, scoring="supervisor_rel", expected_error=ee)
+    r_high = score_sigma_profile(sig, high, scoring="supervisor_rel", expected_error=ee)
+    assert r_low.risk_score == pytest.approx(r_high.risk_score)
+
+
+def test_supervisor_and_expected_aliases_match_canonical_modes():
+    ee = torch.tensor([1.0, 0.5, 0.2])
+    sig = torch.full((3,), 0.01)
+    rad = torch.tensor([1.05, 1.20, 1.50])
+    assert score_sigma_profile(sig, rad, scoring="supervisor", expected_error=ee).risk_score == pytest.approx(
+        score_sigma_profile(sig, rad, scoring="supervisor_rel", expected_error=ee).risk_score
+    )
+    assert score_sigma_profile(sig, rad, scoring="supervisor_p95", expected_error=ee).risk_score == pytest.approx(
+        score_sigma_profile(sig, rad, scoring="supervisor_rel_p95", expected_error=ee).risk_score
+    )
+    assert score_sigma_profile(sig, rad, scoring="expected", expected_error=ee).risk_score == pytest.approx(
+        score_sigma_profile(sig, rad, scoring="expected_abs", expected_error=ee).risk_score
+    )
+
+
+def test_absolute_expected_threshold_is_cross_trajectory_consistent():
+    # an absolute threshold over expected_abs flags by the same ee value regardless of altitude
+    sig = torch.full((5,), 0.01)
+    s_hi = score_sigma_profile(sig, torch.full((5,), 1.50), scoring="expected_abs", expected_error=torch.full((5,), 2.0))
+    s_lo = score_sigma_profile(sig, torch.full((5,), 1.05), scoring="expected_abs", expected_error=torch.full((5,), 0.5))
+    risks = torch.tensor([s_hi.risk_score, s_lo.risk_score])
+    report = select_reruns(risks, threshold=1.0)
+    assert report.flagged_indices == [0]  # only the high-expected-error orbit, not the low one
+
+
+def test_score_stores_both_relative_and_absolute_point_risk():
+    ee = torch.tensor([1.0, 0.5])
+    s = score_sigma_profile(torch.full((2,), 0.01), torch.tensor([1.05, 1.50]), scoring="supervisor_abs", expected_error=ee)
+    assert not math.isnan(s.mean_point_risk)  # relative still computed
+    assert not math.isnan(s.mean_point_risk_abs)  # absolute computed
+    assert s.risk_score == pytest.approx(s.mean_point_risk_abs)
+
+
+# ---- P4: time weighting (kepler_r2 ~ r^2) ----
+
+def test_kepler_time_weighting_changes_mean_for_eccentric():
+    radius = torch.tensor([1.05, 1.10, 1.30, 1.55])  # eccentric sweep
+    sigma = torch.tensor([4.0, 3.0, 2.0, 1.0])  # higher uncertainty low down
+    uniform = score_sigma_profile(sigma, radius, scoring="mean")
+    weighted = score_sigma_profile(sigma, radius, scoring="mean", weights=radius * radius)
+    assert weighted.mean_sigma != pytest.approx(uniform.mean_sigma)
+
+
+def test_kepler_time_weighting_is_uniform_for_circular():
+    radius = torch.full((6,), 1.20)  # constant radius -> r^2 weights are all equal
+    sigma = torch.tensor([1.0, 2.0, 3.0, 4.0, 5.0, 6.0])
+    uniform = score_sigma_profile(sigma, radius, scoring="mean")
+    weighted = score_sigma_profile(sigma, radius, scoring="mean", weights=radius * radius)
+    assert weighted.mean_sigma == pytest.approx(uniform.mean_sigma)
+
+
+def test_run_time_weighting_resolver_maps_legacy_boolean():
+    from vesp.uq.run import _resolve_time_weighting
+
+    assert _resolve_time_weighting({}) == "none"
+    assert _resolve_time_weighting({"time_weighted": True}) == "kepler_r2"
+    assert _resolve_time_weighting({"time_weighting": "kepler_r2"}) == "kepler_r2"
+    with pytest.raises(ValueError):
+        _resolve_time_weighting({"time_weighting": "bogus"})
+
+
+# ---- P7: calibration-based absolute thresholds ----
+
+def test_calibrate_risk_threshold_matches_quantile():
+    vals = torch.arange(100, dtype=torch.float64)
+    thr = calibrate_risk_threshold(vals, quantile=0.90)
+    assert float((vals < thr).to(torch.float64).mean()) == pytest.approx(0.9, abs=0.02)
+    assert calibrate_risk_threshold(vals, 0.5, multiplier=2.0) == pytest.approx(2.0 * float(torch.quantile(vals, 0.5)))
+
+
+def test_calibrated_threshold_yields_zero_alarms_on_lower_risk_set():
+    calibration = torch.arange(100, dtype=torch.float64)
+    thr = calibrate_risk_threshold(calibration, quantile=0.99)  # ~98-99
+    test_set = torch.full((50,), 5.0)  # entirely below the calibrated budget
+    report = select_reruns(test_set, threshold=thr)
+    assert report.n_flagged == 0

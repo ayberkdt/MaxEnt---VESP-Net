@@ -7,45 +7,57 @@ run a cheap surrogate Monte Carlo, score every trajectory here, and rerun only t
 flagged subset -- preserving most of the speed advantage while removing blind trust in the
 surrogate where it is least reliable (low altitude / ill-conditioned / out-of-support regimes).
 
-Two families of per-point risk are supported:
+Per-point risk comes in three families:
 
 - the original ``sigma`` (predictive std) modes, kept verbatim for backward compatibility;
-- the stronger *supervisor* modes built on ``expected_error = sqrt(bias^2 + sigma^2)``, an
-  altitude weight, and (optionally) a domain-support penalty -- so a trajectory is flagged for
-  having large *expected error where it matters*, not merely large uncertainty.
+- *relative* expected-error / supervisor modes, normalized per trajectory -- good for RANKING
+  one ensemble (which orbits to prioritize), not for cross-trajectory absolute thresholds;
+- *absolute* expected-error / supervisor modes, normalized by a fixed altitude reference -- so a
+  single physical risk budget means the same thing for every trajectory (zero-alarm screening).
 
-Nothing here evaluates a gravity model; it consumes per-point arrays, so it is fully
+``expected_error = sqrt(bias^2 + sigma^2)`` underpins both the relative and absolute supervisor
+modes. Nothing here evaluates a gravity model; it consumes per-point arrays, so it is fully
 surrogate-agnostic and cheap.
 """
 
 from __future__ import annotations
 
+import math
 from dataclasses import asdict, dataclass
 
 import torch
 
 # Scoring functions that turn a per-position profile into one trajectory number.
-# The first five are sigma-only (legacy); the last five use expected_error / domain support.
-SCORING_FUNCTIONS = (
-    "max",
-    "mean",
-    "low_alt_integral",
-    "time_above",
-    "combined",
+# Legacy sigma-only modes:
+_SIGMA_MODES = ("max", "mean", "low_alt_integral", "time_above", "combined")
+# Expected-error modes. `expected`/`expected_p95` are aliases of the absolute variants (no
+# altitude weighting); `supervisor`/`supervisor_p95` are aliases of the RELATIVE variants
+# (per-trajectory altitude normalization, for ranking).
+_EXPECTED_ONLY_MODES = (
     "expected",
+    "expected_abs",
     "expected_p95",
+    "expected_abs_p95",
     "expected_low_alt",
-    "supervisor",
-    "supervisor_p95",
 )
+_SUPERVISOR_MODES = (
+    "supervisor",
+    "supervisor_rel",
+    "supervisor_p95",
+    "supervisor_rel_p95",
+    "supervisor_abs",
+    "supervisor_abs_p95",
+)
+SCORING_FUNCTIONS = _SIGMA_MODES + _EXPECTED_ONLY_MODES + _SUPERVISOR_MODES
 
 # Modes that need a per-point ``expected_error`` profile (and so cannot run on sigma alone).
-_EXPECTED_MODES = frozenset(
-    {"expected", "expected_p95", "expected_low_alt", "supervisor", "supervisor_p95"}
-)
+_EXPECTED_MODES = frozenset(_EXPECTED_ONLY_MODES + _SUPERVISOR_MODES)
 
 # Aggregators for collapsing a per-point true-error profile into one trajectory scalar.
 TRUE_ERROR_AGGREGATORS = ("max", "mean", "p95")
+
+# Fraction-mode selection policies for select_reruns.
+FRACTION_POLICIES = ("topk", "quantile")
 
 
 @dataclass
@@ -53,9 +65,13 @@ class TrajectoryScore:
     """Aggregated risk summary for a single trajectory's output points.
 
     The ``*_sigma`` / ``*_altitude_risk`` fields are the legacy sigma-based aggregations. The
-    ``*_expected_error`` / ``*_point_risk`` / ``*_domain_risk`` fields are the stronger
-    supervisor metrics; they are ``nan`` when the relevant per-point profile was not supplied
-    (e.g. calling :func:`score_sigma_profile` with sigma only, or with domain support disabled).
+    ``*_expected_error`` / ``*_point_risk*`` / ``*_domain_risk`` fields are the supervisor
+    metrics; they are ``nan`` when the relevant per-point profile was not supplied (e.g. calling
+    :func:`score_sigma_profile` with sigma only, or with domain support disabled).
+
+    ``mean_point_risk`` / ``p95_point_risk`` are the RELATIVE supervisor risk (per-trajectory
+    altitude normalization -- for ranking). ``mean_point_risk_abs`` / ``p95_point_risk_abs`` are
+    the ABSOLUTE supervisor risk (fixed altitude reference -- for cross-trajectory thresholds).
     """
 
     n_points: int
@@ -76,8 +92,12 @@ class TrajectoryScore:
     low_altitude_expected_error_integral: float = float("nan")
     max_mean_error_magnitude: float = float("nan")
     mean_mean_error_magnitude: float = float("nan")
+    # relative supervisor point risk (per-trajectory altitude normalization)
     mean_point_risk: float = float("nan")
     p95_point_risk: float = float("nan")
+    # absolute supervisor point risk (fixed altitude reference)
+    mean_point_risk_abs: float = float("nan")
+    p95_point_risk_abs: float = float("nan")
     # --- domain-support metrics (only when domain support is supplied) ---
     max_domain_risk: float = float("nan")
     time_outside_support: float = float("nan")
@@ -154,6 +174,23 @@ def aggregate_trajectory_error(values, mode: str = "p95") -> float:
     return float(torch.quantile(v, 0.95))
 
 
+def calibrate_risk_threshold(values, quantile: float = 0.95, multiplier: float = 1.0) -> float:
+    """Absolute risk threshold from a held-out risk distribution: ``quantile(values) * multiplier``.
+
+    ``values`` is a 1-D array of in-distribution risk samples -- either per-point
+    ``expected_error`` or per-trajectory risk scores from a calibration set. The returned
+    threshold is meant for the absolute ``select_reruns(threshold=...)`` path so a downstream
+    test set with lower risk can legitimately raise zero alarms.
+    """
+
+    v = _as_1d(values)
+    if v.numel() == 0:
+        return float("nan")
+    if not 0.0 <= float(quantile) <= 1.0:
+        raise ValueError("quantile must be in [0, 1]")
+    return float(torch.quantile(v, float(quantile))) * float(multiplier)
+
+
 def _altitude_weight(radius: torch.Tensor, *, h_floor: float) -> torch.Tensor:
     """Weight that grows toward the surface: ``1 / max(r - 1, h_floor)``.
 
@@ -164,16 +201,32 @@ def _altitude_weight(radius: torch.Tensor, *, h_floor: float) -> torch.Tensor:
     return 1.0 / (radius - 1.0).clamp_min(h_floor)
 
 
-def _normalized_altitude_weight(radius: torch.Tensor, *, h_floor: float) -> torch.Tensor:
-    """Altitude weight rescaled by its own median so a typical-altitude point weighs ~1.
+def _relative_altitude_weight(radius: torch.Tensor, *, h_floor: float) -> torch.Tensor:
+    """Altitude weight rescaled by its OWN median so a typical point on THIS trajectory weighs ~1.
 
-    Keeps the supervisor point risk on roughly the same scale as ``expected_error`` (instead of
-    the raw ``1/(r-1)`` blow-up), so trajectories stay comparable across altitude profiles.
+    Good for ranking within an ensemble (keeps the supervisor point risk on the scale of
+    ``expected_error``), but NOT comparable across trajectories -- a constant-altitude orbit
+    always normalizes to 1 regardless of how low it is. Use the absolute weight for thresholds.
     """
 
     w = _altitude_weight(radius, h_floor=h_floor)
     med = torch.median(w)
     return w / med.clamp_min(torch.finfo(w.dtype).tiny)
+
+
+def _absolute_altitude_weight(
+    radius: torch.Tensor, *, h_floor: float, reference_h: float
+) -> torch.Tensor:
+    """Altitude weight rescaled by a FIXED reference altitude so it means the same everywhere.
+
+    ``abs_weight = raw_weight / reference_weight`` with ``reference_weight = 1 / reference_h``;
+    i.e. a point at altitude ``h = reference_h`` weighs 1, lower points weigh >1, higher <1 --
+    the same mapping for every trajectory, so absolute thresholds are consistent.
+    """
+
+    raw = _altitude_weight(radius, h_floor=h_floor)
+    reference_weight = 1.0 / max(float(reference_h), h_floor)
+    return raw / reference_weight
 
 
 def score_sigma_profile(
@@ -184,6 +237,7 @@ def score_sigma_profile(
     sigma_threshold: float | None = None,
     low_altitude_radius: float = 1.15,
     h_floor: float = 1.0e-3,
+    altitude_reference_h: float | None = None,
     epistemic_sigma: torch.Tensor | None = None,
     expected_error: torch.Tensor | None = None,
     mean_error_magnitude: torch.Tensor | None = None,
@@ -204,13 +258,17 @@ def score_sigma_profile(
       - ``time_above``: (weighted) fraction of points whose sigma exceeds ``sigma_threshold``.
       - ``combined``: mean of ``sigma`` times an altitude weight (uncertain-and-low).
 
-    Supervisor modes (require ``expected_error``):
-      - ``expected``: mean expected error.
-      - ``expected_p95``: 95th-percentile expected error.
+    Expected-error modes (require ``expected_error``):
+      - ``expected`` / ``expected_abs``: mean expected error.
+      - ``expected_p95`` / ``expected_abs_p95``: 95th-percentile expected error.
       - ``expected_low_alt``: summed expected error below ``low_altitude_radius``.
-      - ``supervisor``: mean of ``point_risk = expected_error * norm_altitude_weight *
-        (1 + domain_weight * domain_risk)``.
-      - ``supervisor_p95``: 95th percentile of that same ``point_risk``.
+
+    Supervisor modes (``point_risk = expected_error * altitude_weight * (1 + domain_weight *
+    domain_risk)``):
+      - ``supervisor`` / ``supervisor_rel`` (+ ``_p95``): RELATIVE altitude weight (per-trajectory
+        median) -- for ranking an ensemble.
+      - ``supervisor_abs`` (+ ``_p95``): ABSOLUTE altitude weight (fixed reference
+        ``altitude_reference_h``, default ``low_altitude_radius - 1``) -- for absolute thresholds.
 
     ``risk_score`` is whichever of the above ``scoring`` selects.
     """
@@ -229,6 +287,12 @@ def score_sigma_profile(
             f"scoring={scoring!r} requires an expected_error profile; score via "
             "VESPUQPlugin.score_trajectory or pass expected_error explicitly"
         )
+
+    reference_h = (
+        float(altitude_reference_h)
+        if altitude_reference_h is not None
+        else max(float(low_altitude_radius) - 1.0, h_floor)
+    )
 
     w = _normalize_weights(weights, n)
     low_mask = radius <= float(low_altitude_radius)
@@ -256,9 +320,10 @@ def score_sigma_profile(
         else float("nan")
     )
 
-    # ---- supervisor metrics (expected error / mean-error magnitude / domain) ----
+    # ---- expected-error + supervisor metrics ----
     max_ee = mean_ee = p95_ee = low_alt_ee = float("nan")
-    mean_point_risk = p95_point_risk = float("nan")
+    mean_pr_rel = p95_pr_rel = float("nan")
+    mean_pr_abs = p95_pr_abs = float("nan")
     if expected_error is not None:
         ee = _as_1d(expected_error, n, "expected_error")
         max_ee = float(ee.max())
@@ -269,15 +334,21 @@ def score_sigma_profile(
         else:
             low_alt_ee = 0.0
 
-        norm_alt = _normalized_altitude_weight(radius, h_floor=h_floor)
         if domain_risk is not None:
             dr = _as_1d(domain_risk, n, "domain_risk")
             domain_factor = 1.0 + float(domain_weight) * dr
         else:
             domain_factor = torch.ones_like(ee)
-        point_risk = ee * norm_alt * domain_factor
-        mean_point_risk = _wmean(point_risk, w)
-        p95_point_risk = _weighted_quantile(point_risk, 0.95, w)
+
+        rel_alt = _relative_altitude_weight(radius, h_floor=h_floor)
+        point_risk_rel = ee * rel_alt * domain_factor
+        mean_pr_rel = _wmean(point_risk_rel, w)
+        p95_pr_rel = _weighted_quantile(point_risk_rel, 0.95, w)
+
+        abs_alt = _absolute_altitude_weight(radius, h_floor=h_floor, reference_h=reference_h)
+        point_risk_abs = ee * abs_alt * domain_factor
+        mean_pr_abs = _wmean(point_risk_abs, w)
+        p95_pr_abs = _weighted_quantile(point_risk_abs, 0.95, w)
 
     max_mem = mean_mem = float("nan")
     if mean_error_magnitude is not None:
@@ -298,11 +369,20 @@ def score_sigma_profile(
         "low_alt_integral": low_alt_integral,
         "time_above": time_above,
         "combined": combined,
+        # expected-error (absolute scale; `expected`/`expected_p95` are backward-compat aliases)
         "expected": mean_ee,
+        "expected_abs": mean_ee,
         "expected_p95": p95_ee,
+        "expected_abs_p95": p95_ee,
         "expected_low_alt": low_alt_ee,
-        "supervisor": mean_point_risk,
-        "supervisor_p95": p95_point_risk,
+        # relative supervisor (ranking) -- `supervisor`/`supervisor_p95` are aliases
+        "supervisor": mean_pr_rel,
+        "supervisor_rel": mean_pr_rel,
+        "supervisor_p95": p95_pr_rel,
+        "supervisor_rel_p95": p95_pr_rel,
+        # absolute supervisor (thresholds)
+        "supervisor_abs": mean_pr_abs,
+        "supervisor_abs_p95": p95_pr_abs,
     }
 
     return TrajectoryScore(
@@ -323,8 +403,10 @@ def score_sigma_profile(
         low_altitude_expected_error_integral=low_alt_ee,
         max_mean_error_magnitude=max_mem,
         mean_mean_error_magnitude=mean_mem,
-        mean_point_risk=mean_point_risk,
-        p95_point_risk=p95_point_risk,
+        mean_point_risk=mean_pr_rel,
+        p95_point_risk=p95_pr_rel,
+        mean_point_risk_abs=mean_pr_abs,
+        p95_point_risk_abs=p95_pr_abs,
         max_domain_risk=max_domain_risk,
         time_outside_support=time_outside_support,
     )
@@ -343,8 +425,14 @@ class RiskScreeningReport:
     mean_risk_accepted: float | None = None
     # Selection-policy bookkeeping (so the report says *why* a given count was flagged):
     selection_mode: str = "fraction"  # fraction | threshold | threshold+max_fraction
+    fraction_policy: str | None = None  # topk | quantile (fraction mode only)
+    requested_rerun_fraction: float | None = None
+    n_requested: int | None = None
+    n_ties_at_cutoff: int | None = None
     max_rerun_fraction: float | None = None
     n_above_threshold: int | None = None
+    threshold_source: str | None = None  # manual | calibration_quantile
+    threshold_quantile: float | None = None
     # Validation against a ground-truth error metric (only when ``true_error`` is supplied):
     capture_rate: float | None = None  # share of truly-high-error trajectories that got flagged
     precision: float | None = None  # share of flagged trajectories that were truly high-error
@@ -384,19 +472,24 @@ def select_reruns(
     rerun_fraction: float | None = None,
     threshold: float | None = None,
     max_rerun_fraction: float | None = None,
+    fraction_policy: str = "topk",
     true_error=None,
     true_error_quantile: float = 0.90,
+    threshold_source: str | None = None,
+    threshold_quantile: float | None = None,
 ) -> RiskScreeningReport:
     """Flag the riskiest trajectories for high-fidelity rerun.
 
     Three selection policies:
 
-    - ``rerun_fraction`` only: rerun the top fraction (threshold = matching risk quantile).
+    - ``rerun_fraction`` only: rerun the top fraction. ``fraction_policy="topk"`` (default) flags
+      EXACTLY ``ceil(rerun_fraction * n)`` trajectories by stable top-k (robust to ties);
+      ``"quantile"`` keeps the legacy quantile-threshold behavior (which can over-flag on ties).
     - ``threshold`` only: rerun every trajectory at or above an absolute risk threshold. If
-      nothing exceeds it, *zero* trajectories are flagged -- a safe in-distribution benchmark is
-      allowed to raise no alarms.
+      nothing exceeds it, *zero* trajectories are flagged -- a safe set may raise no alarms.
     - ``threshold`` + ``max_rerun_fraction``: take everything above the absolute threshold, but
-      if that exceeds the budget, keep only the top ``max_rerun_fraction`` by risk.
+      if that exceeds the budget ``ceil(max_rerun_fraction * n)``, keep only the top of them
+      (at least 1 whenever anything is above the threshold).
 
     When ``true_error`` (one scalar per trajectory) is supplied, the report also validates the
     screen: ``capture_rate`` is the share of the truly-high-error trajectories (top
@@ -408,6 +501,8 @@ def select_reruns(
     n = int(risk.numel())
     if n == 0:
         raise ValueError("risk_scores is empty")
+    if fraction_policy not in FRACTION_POLICIES:
+        raise ValueError(f"fraction_policy must be one of {FRACTION_POLICIES}, got {fraction_policy!r}")
 
     has_frac = rerun_fraction is not None
     has_thr = threshold is not None
@@ -430,26 +525,47 @@ def select_reruns(
     else:
         raise ValueError("provide rerun_fraction, threshold, or threshold + max_rerun_fraction")
 
+    order = torch.argsort(risk, descending=True, stable=True)  # stable top-k by risk
     n_above_threshold: int | None = None
+    n_requested: int | None = None
+    n_ties_at_cutoff: int | None = None
+    applied_fraction_policy: str | None = None
+
     if selection_mode == "fraction":
-        if not 0.0 < float(rerun_fraction) <= 1.0:
+        f = float(rerun_fraction)
+        if not 0.0 < f <= 1.0:
             raise ValueError("rerun_fraction must be in (0, 1]")
-        thr = float(torch.quantile(risk, 1.0 - float(rerun_fraction)))
-        flagged_mask = risk >= thr
+        applied_fraction_policy = fraction_policy
+        k = n if f >= 1.0 else min(n, int(math.ceil(f * n)))
+        n_requested = k
+        if fraction_policy == "topk":
+            flagged_mask = torch.zeros(n, dtype=torch.bool)
+            flagged_mask[order[:k]] = True
+            cutoff = float(risk[order[k - 1]]) if k > 0 else float("inf")
+            thr = cutoff
+            n_ties_at_cutoff = int((risk == risk[order[k - 1]]).sum()) if k > 0 else 0
+        else:  # quantile (legacy)
+            thr = float(torch.quantile(risk, 1.0 - f))
+            flagged_mask = risk >= thr
+            n_ties_at_cutoff = int((risk == thr).sum())
     else:
         thr = float(threshold)
         above_mask = risk >= thr
         n_above_threshold = int(above_mask.sum())
+        if threshold_source is None:
+            threshold_source = "manual"
         if selection_mode == "threshold":
             flagged_mask = above_mask
         else:  # threshold + max_fraction
-            if not 0.0 < float(max_rerun_fraction) <= 1.0:
+            mf = float(max_rerun_fraction)
+            if not 0.0 < mf <= 1.0:
                 raise ValueError("max_rerun_fraction must be in (0, 1]")
-            cap = int(float(max_rerun_fraction) * n)
+            cap = int(math.ceil(mf * n))
+            cap = max(1, cap) if n_above_threshold > 0 else 0
+            n_requested = cap
             if n_above_threshold <= cap:
                 flagged_mask = above_mask
             else:
-                order = torch.argsort(risk, descending=True)
                 flagged_mask = torch.zeros(n, dtype=torch.bool)
                 flagged_mask[order[:cap]] = True
 
@@ -466,8 +582,14 @@ def select_reruns(
         mean_risk_flagged=float(risk[flagged_mask].mean()) if n_flagged > 0 else float("nan"),
         mean_risk_accepted=float(risk[accepted_mask].mean()) if bool(accepted_mask.any()) else float("nan"),
         selection_mode=selection_mode,
+        fraction_policy=applied_fraction_policy,
+        requested_rerun_fraction=float(rerun_fraction) if has_frac else None,
+        n_requested=n_requested,
+        n_ties_at_cutoff=n_ties_at_cutoff,
         max_rerun_fraction=float(max_rerun_fraction) if has_max else None,
         n_above_threshold=n_above_threshold,
+        threshold_source=threshold_source,
+        threshold_quantile=threshold_quantile,
     )
 
     if true_error is not None:
@@ -497,8 +619,11 @@ def run_risk_screening(
     rerun_fraction: float | None = 0.20,
     threshold: float | None = None,
     max_rerun_fraction: float | None = None,
+    fraction_policy: str = "topk",
     scoring: str = "max",
     weights=None,
+    threshold_source: str | None = None,
+    threshold_quantile: float | None = None,
 ) -> dict:
     """Score a trajectory ensemble with ``plugin`` and select the high-fidelity rerun subset.
 
@@ -521,9 +646,16 @@ def run_risk_screening(
             threshold=threshold,
             max_rerun_fraction=max_rerun_fraction,
             true_error=true_error,
+            threshold_source=threshold_source,
+            threshold_quantile=threshold_quantile,
         )
     else:
-        report = select_reruns(risk, rerun_fraction=rerun_fraction, true_error=true_error)
+        report = select_reruns(
+            risk,
+            rerun_fraction=rerun_fraction,
+            fraction_policy=fraction_policy,
+            true_error=true_error,
+        )
     return {
         "trajectory_scores": scores,
         "selected_reruns": report.flagged_indices,

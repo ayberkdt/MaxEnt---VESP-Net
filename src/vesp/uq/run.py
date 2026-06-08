@@ -83,6 +83,22 @@ def _time_weights(traj: torch.Tensor) -> torch.Tensor:
     return r * r
 
 
+def _resolve_time_weighting(screen_cfg: dict) -> str:
+    """Resolve the time-weighting mode, honoring the legacy ``time_weighted`` boolean.
+
+    ``uq.screening.time_weighting: none | kepler_r2`` takes precedence; otherwise the legacy
+    ``time_weighted: true/false`` maps to ``kepler_r2`` / ``none``.
+    """
+
+    mode = screen_cfg.get("time_weighting")
+    if mode is None:
+        mode = "kepler_r2" if bool(screen_cfg.get("time_weighted", False)) else "none"
+    mode = str(mode).lower()
+    if mode not in {"none", "kepler_r2"}:
+        raise ValueError("uq.screening.time_weighting must be 'none' or 'kepler_r2'")
+    return mode
+
+
 def _stat(values) -> dict:
     """mean / max / p95 of a list of scalars, dropping NaNs (empty -> {})."""
 
@@ -139,12 +155,17 @@ def run_vespuq(config: dict) -> dict:
         dtype=dtype,
     )
     scoring = plugin.risk_scoring
+    fraction_policy = str(screen_cfg.get("fraction_policy", "topk")).lower()
 
-    # Optional time-weighting: orbits are sampled uniformly in true anomaly, which oversamples
-    # periapsis for eccentric orbits. Weighting each point by ~dt (proportional to r^2 for a
-    # Keplerian orbit) recovers an approximately time-uniform aggregation.
-    time_weighted = bool(screen_cfg.get("time_weighted", False))
-    weights = [_time_weights(traj) for traj in ensemble.trajectories] if time_weighted else None
+    # Time-weighting: orbits are sampled uniformly in true anomaly, which oversamples periapsis
+    # for eccentric orbits. `kepler_r2` weights each point by ~dt (proportional to r^2) to recover
+    # an approximately time-uniform aggregation. Resolved from `time_weighting` (or legacy bool).
+    time_weighting = _resolve_time_weighting(screen_cfg)
+    weights = (
+        [_time_weights(traj) for traj in ensemble.trajectories]
+        if time_weighting == "kepler_r2"
+        else None
+    )
 
     t0 = time.perf_counter()
     scores = plugin.score_ensemble(ensemble.trajectories, weights=weights)
@@ -169,19 +190,33 @@ def run_vespuq(config: dict) -> dict:
 
     # Selection policy: an absolute threshold (optionally capped by max_rerun_fraction) takes
     # precedence over the fixed top-fraction budget. With a threshold, a safe in-distribution
-    # benchmark is allowed to flag *zero* trajectories.
+    # benchmark is allowed to flag *zero* trajectories. The threshold may be supplied directly
+    # (`threshold`) or derived from a held-out calibration quantile (`threshold_quantile`).
     threshold = screen_cfg.get("threshold")
+    threshold_quantile = screen_cfg.get("threshold_quantile")
     max_rerun_fraction = screen_cfg.get("max_rerun_fraction")
     rerun_fraction = float(screen_cfg.get("rerun_fraction", 0.20))
+    threshold_source = None
+    if threshold is None and threshold_quantile is not None:
+        # pointwise force-error budget: quantile of held-out per-point expected_error
+        threshold = plugin.calibrate_risk_threshold(held.positions, quantile=float(threshold_quantile))
+        threshold_source = "calibration_quantile"
     if threshold is not None:
         screening = select_reruns(
             risk_scores,
             threshold=float(threshold),
             max_rerun_fraction=float(max_rerun_fraction) if max_rerun_fraction is not None else None,
             true_error=true_error,
+            threshold_source=threshold_source,
+            threshold_quantile=float(threshold_quantile) if threshold_quantile is not None else None,
         )
     else:
-        screening = select_reruns(risk_scores, rerun_fraction=rerun_fraction, true_error=true_error)
+        screening = select_reruns(
+            risk_scores,
+            rerun_fraction=rerun_fraction,
+            fraction_policy=fraction_policy,
+            true_error=true_error,
+        )
 
     n_traj = len(ensemble.trajectories)
     n_points_total = sum(int(t.shape[0]) for t in ensemble.trajectories)
@@ -196,8 +231,15 @@ def run_vespuq(config: dict) -> dict:
             "n_trajectories": n_traj,
             "n_output_points_total": n_points_total,
             "true_error_aggregator": true_error_aggregator,
-            "time_weighted": time_weighted,
+            "time_weighting": time_weighting,
+            "time_weighted": time_weighting == "kepler_r2",  # legacy boolean, kept for readers
+            "fraction_policy": fraction_policy,
             "domain_support": plugin.domain_support,
+            "domain_component_weights": {
+                "distance": plugin.domain_distance_weight,
+                "radial": plugin.domain_radial_weight,
+                "angular": plugin.domain_angular_weight,
+            },
             "expected_error": _expected_error_summary(scores, plugin.domain_support),
             "screen": screening.to_dict(),
         },
@@ -259,6 +301,7 @@ def _build_tables(scores, screening, true_error, flagged_set) -> dict:
         "max_expected_error", "mean_expected_error", "p95_expected_error",
         "low_altitude_expected_error_integral", "max_mean_error_magnitude",
         "mean_mean_error_magnitude", "mean_point_risk", "p95_point_risk",
+        "mean_point_risk_abs", "p95_point_risk_abs",
         "max_domain_risk", "time_outside_support",
         "flagged_for_rerun", "true_error",
     ]
@@ -271,6 +314,7 @@ def _build_tables(scores, screening, true_error, flagged_set) -> dict:
             s.max_expected_error, s.mean_expected_error, s.p95_expected_error,
             s.low_altitude_expected_error_integral, s.max_mean_error_magnitude,
             s.mean_mean_error_magnitude, s.mean_point_risk, s.p95_point_risk,
+            s.mean_point_risk_abs, s.p95_point_risk_abs,
             s.max_domain_risk, s.time_outside_support,
             int(i in flagged_set), float(true_error[i]),
         ])
@@ -354,29 +398,72 @@ def build_report_md(report: dict) -> str:
     ee = screen.get("expected_error", {})
     sel_mode = sc.get("selection_mode", "fraction")
     zero_alarms = sc.get("n_flagged") == 0
+
+    selection_line = f"- selection: `{sel_mode}`"
+    if sel_mode == "fraction":
+        selection_line += (
+            f" (policy `{sc.get('fraction_policy', 'topk')}`, requested "
+            f"{_fmt(100 * (sc.get('requested_rerun_fraction') or 0.0), '.1f')}%)"
+        )
+    else:
+        selection_line += f" -> threshold (risk score) {_fmt(sc['threshold'], '.3e')}"
+        if sc.get("threshold_source"):
+            selection_line += f" [{sc['threshold_source']}]"
+        if sc.get("max_rerun_fraction") is not None:
+            selection_line += f", max rerun fraction {_fmt(sc.get('max_rerun_fraction'), '.2f')}"
+        if sc.get("n_above_threshold") is not None:
+            selection_line += f", {sc.get('n_above_threshold')} above threshold"
+
+    sp = sc.get("spearman_risk_vs_error")
+    sp_note = ""
+    try:
+        if sp is not None and not math.isnan(float(sp)) and abs(float(sp)) < 0.1:
+            sp_note = " -- near zero: risk did not rank the supplied true-error metric on this set"
+    except (TypeError, ValueError):
+        pass
+
+    if zero_alarms:
+        validation_lines = [
+            "- validation: 0 flagged -> capture rate / precision are not meaningful (no positives)",
+            f"- Spearman(risk, true error): {_fmt(sp, '.2f')}{sp_note}",
+        ]
+    else:
+        validation_lines = [
+            f"- capture rate (top-decile true-error orbits flagged): **{_fmt(sc.get('capture_rate'), '.2f')}**  "
+            f"| precision: {_fmt(sc.get('precision'), '.2f')}  | lift over random: {_fmt(s.get('lift_over_random'), '.2f')}x",
+            f"- Spearman(risk, true error): {_fmt(sp, '.2f')}{sp_note}",
+            f"- mean true error  flagged: {_fmt(sc.get('mean_error_flagged'), '.3e')}  vs  "
+            f"accepted: {_fmt(sc.get('mean_error_accepted'), '.3e')}  "
+            f"(ratio {_fmt(sc.get('error_ratio_flagged_to_accepted'), '.2f')}x)",
+        ]
+
     lines += [
         "",
         "## Experiment 3 - Trajectory risk screening",
         "",
         f"- ensemble: {screen['n_trajectories']} orbits, {screen['n_output_points_total']} output points "
         f"(scoring = `{screen['scoring']}`, oracle = `{screen['oracle_source']}`, "
-        f"true-error aggregator = `{screen.get('true_error_aggregator', 'p95')}`"
-        f"{', time-weighted' if screen.get('time_weighted') else ''}"
+        f"true-error aggregator = `{screen.get('true_error_aggregator', 'p95')}`, "
+        f"time-weighting = `{screen.get('time_weighting', 'none')}`"
         f"{', domain-support on' if screen.get('domain_support') else ''})",
-        f"- selection: `{sel_mode}` -> threshold (risk score) {_fmt(sc['threshold'], '.3e')}"
-        + (f", max rerun fraction {_fmt(sc.get('max_rerun_fraction'), '.2f')}" if sc.get("max_rerun_fraction") is not None else "")
-        + (f", {sc.get('n_above_threshold')} above threshold" if sc.get("n_above_threshold") is not None else ""),
+        selection_line,
         f"- flagged {sc['n_flagged']}/{sc['n_trajectories']} ({_fmt(100 * sc['rerun_fraction'], '.1f')}%)"
         + ("  -- **no trajectory exceeded the absolute risk threshold (zero alarms)**" if zero_alarms and sel_mode != "fraction" else ""),
         f"- expected-error per orbit (ensemble mean | max): mean "
         f"{_fmt((ee.get('mean_expected_error') or {}).get('mean'), '.3e')} | "
         f"max {_fmt((ee.get('max_expected_error') or {}).get('max'), '.3e')}",
-        f"- capture rate (top-decile true-error orbits flagged): **{_fmt(sc.get('capture_rate'), '.2f')}**  "
-        f"| precision: {_fmt(sc.get('precision'), '.2f')}  | lift over random: {_fmt(s.get('lift_over_random'), '.2f')}x",
-        f"- Spearman(risk, true error): {_fmt(sc.get('spearman_risk_vs_error'), '.2f')}",
-        f"- mean true error  flagged: {_fmt(sc.get('mean_error_flagged'), '.3e')}  vs  "
-        f"accepted: {_fmt(sc.get('mean_error_accepted'), '.3e')}  "
-        f"(ratio {_fmt(sc.get('error_ratio_flagged_to_accepted'), '.2f')}x)",
+        *validation_lines,
+        "",
+        "### What these metrics mean",
+        "",
+        "- **force-risk ranking** (Spearman, lift): does the VESP-UQ *force-error* risk order "
+        "orbits the way the supplied true-error metric does?",
+        "- **trajectory-error ranking** (capture rate, error ratio): do flagged orbits carry larger "
+        "*true trajectory* error -- a different question from force-risk calibration.",
+        "- **false-alarm behavior**: under an absolute threshold a safe set may flag zero; a fixed "
+        "top-fraction always flags ~`rerun_fraction` by construction.",
+        "- **rerun prioritization**: relative supervisor modes *rank* which orbits to rerun first; "
+        "absolute modes decide whether *any* orbit exceeds a physical budget.",
         "",
         "## Runtime",
         "",
