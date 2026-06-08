@@ -1,5 +1,5 @@
 # VESP-UQ -- Equivalent-source uncertainty calibration layer on the real lunar residual.
-#   python -m vesp.uq.run --config configs/vespuq_real_lunar.yaml
+#   python -m vesp.uq.run --config configs/vespuq/vespuq_real_lunar.yaml
 #
 # Runs Experiment 1 (standalone residual-error calibration) and Experiment 3 (trajectory risk
 # screening) on the GRAIL gl0420a degree-2..60 residual. That residual IS the error of a

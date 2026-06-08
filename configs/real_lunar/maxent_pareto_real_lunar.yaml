@@ -1,14 +1,10 @@
-# STRESS TEST (intentionally under-regularized) — NOT a default / production config.
-#   python -m vesp.training.maxent_pareto --config configs/maxent_pareto_real_lunar_lowl2_stress_test.yaml
+# Stage 3A MaxEnt data-error vs entropy Pareto sweep on the real lunar multi-shell case.
+#   python -m vesp.training.maxent_pareto --config configs/real_lunar/maxent_pareto_real_lunar.yaml
 #
-# This preserves the previous behavior of maxent_pareto_real_lunar.yaml, which used a
-# known under-regularized lambda_l2 = 1e-5. At that L2 the deterministic ridge baseline
-# exhibits a brittle inter-shell near-cancellation (shell_cancellation_ratio ~140,
-# sigma_l2 ~9.3). It is kept ONLY to study whether entropy regularization can compensate
-# for missing Tikhonov regularization. The scientifically honest comparison ("does MaxEnt
-# add value beyond a well-regularized ridge fit") uses the conservative L2 = 30 baseline in
-# maxent_pareto_real_lunar.yaml instead. Do not cite numbers from this file as the method's
-# performance.
+# L2 CONSISTENCY (fixed): lambda_l2 is the CONSERVATIVE BASELINE value 30.0 (matching the
+# ridge default), so entropy is tested on top of a de-collapsed fit and entropy_weight=0
+# reproduces the ridge baseline. The earlier under-regularized lambda_l2 = 1e-5 sweep is
+# preserved, clearly labelled, in configs/real_lunar/maxent_pareto_real_lunar_lowl2_stress_test.yaml.
 base_config:
   seed: 42
   device: cpu
@@ -40,11 +36,10 @@ base_config:
     acceleration_sign: 1.0
     source_chunk_size: 1024
 
-  # Intentionally under-regularized (stress test only).
   solver:
     type: maxent
     ridge_method: augmented_lstsq
-    lambda_l2: 1.0e-5
+    lambda_l2: 30.0
     column_normalize: true
 
   loss:
@@ -55,7 +50,7 @@ base_config:
     acceleration_scale: auto
     lambda_potential: 0.2
     lambda_acceleration: 1.0
-    lambda_l2: 1.0e-5
+    lambda_l2: 30.0
     lambda_moment: 1.0e-4
     lambda_dipole: 1.0
     shell_energy_weights: []
@@ -74,12 +69,16 @@ base_config:
     n_altitude_bins: 6
 
   output:
-    output_dir: outputs/maxent_pareto_real_lunar_lowl2_stress_test
+    output_dir: outputs/maxent_pareto_real_lunar
 
+# shell_balance maximizes the entropy of the per-shell energy distribution, which
+# directly targets the dominant Stage 1-2 failure on this dataset: shell-energy
+# collapse onto a single shell. (positive_negative / abs / relative_uniform are also
+# available but are ill-conditioned on the near-sparse source support here.)
 maxent_pareto:
   entropy_mode: shell_balance
   entropy_weights: [0.0, 0.01, 0.03, 0.1, 0.3, 1.0, 3.0]
-  output_dir: outputs/maxent_pareto_real_lunar_lowl2_stress_test
+  output_dir: outputs/maxent_pareto_real_lunar
   max_dominant_shell_energy_fraction: 0.90
   max_top5_source_contribution: 0.40
   data_tolerance_factor: 1.50

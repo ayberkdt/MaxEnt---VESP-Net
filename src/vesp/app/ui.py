@@ -46,12 +46,12 @@ from PyQt6.QtWidgets import (
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 CONFIG_ROOT = PROJECT_ROOT / "configs"
 EXPERIMENTS_CONFIG_ROOT = CONFIG_ROOT / "experiments"
-DEFAULT_SINGLE_CONFIG = CONFIG_ROOT / "discrete_single_shell.yaml"
-DEFAULT_MULTI_CONFIG = CONFIG_ROOT / "discrete_multishell.yaml"
-DEFAULT_ALTITUDE_CONFIG = CONFIG_ROOT / "altitude_ood.yaml"
-DEFAULT_REAL_CONFIG = CONFIG_ROOT / "real_lunar_gl0420a.yaml"
-DEFAULT_REAL_MULTI_CONFIG = CONFIG_ROOT / "real_lunar_gl0420a_multishell.yaml"
-DEFAULT_FEASIBILITY_CONFIG = CONFIG_ROOT / "feasibility_suite.yaml"
+DEFAULT_SINGLE_CONFIG = CONFIG_ROOT / "feasibility" / "discrete_single_shell.yaml"
+DEFAULT_MULTI_CONFIG = CONFIG_ROOT / "feasibility" / "discrete_multishell.yaml"
+DEFAULT_ALTITUDE_CONFIG = CONFIG_ROOT / "feasibility" / "altitude_ood.yaml"
+DEFAULT_REAL_CONFIG = CONFIG_ROOT / "real_lunar" / "real_lunar_gl0420a.yaml"
+DEFAULT_REAL_MULTI_CONFIG = CONFIG_ROOT / "real_lunar" / "real_lunar_gl0420a_multishell.yaml"
+DEFAULT_FEASIBILITY_CONFIG = CONFIG_ROOT / "feasibility" / "feasibility_suite.yaml"
 DEFAULT_OUTPUTS = PROJECT_ROOT / "outputs"
 SUITES_OUTPUT_ROOT = DEFAULT_OUTPUTS / "suites"
 

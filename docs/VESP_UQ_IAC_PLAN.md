@@ -87,8 +87,8 @@ It is surrogate-agnostic: it only needs acceleration samples, not the surrogate'
 Run:
 
 ```text
-python -m vesp.uq.run --config configs/vespuq_smoke.yaml       # tiny synthetic, seconds
-python -m vesp.uq.run --config configs/vespuq_real_lunar.yaml  # GRAIL gl0420a residual
+python -m vesp.uq.run --config configs/vespuq/vespuq_smoke.yaml       # tiny synthetic, seconds
+python -m vesp.uq.run --config configs/vespuq/vespuq_real_lunar.yaml  # GRAIL gl0420a residual
 ```
 
 The binding policy on claims is [`docs/SCIENTIFIC_CLAIMS.md`](SCIENTIFIC_CLAIMS.md); see also

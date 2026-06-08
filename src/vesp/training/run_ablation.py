@@ -373,7 +373,7 @@ def main(argv: Iterable[str] | None = None) -> None:
         "or --config configs/experiments/<name>.yaml",
     )
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config", default="configs/synthetic_stress_multishell.yaml")
+    parser.add_argument("--config", default="configs/feasibility/synthetic_stress_multishell.yaml")
     parser.add_argument("--mode", choices=["quick", "full"], default=None, help="override ablation.mode")
     args = parser.parse_args(argv)
     path = run_ablation(load_config(args.config), mode=args.mode)

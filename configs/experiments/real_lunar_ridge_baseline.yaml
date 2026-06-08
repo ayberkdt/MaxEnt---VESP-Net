@@ -13,7 +13,7 @@
 #
 # L2 NOTE: conservative L2 baseline (lambda_l2 = 30). This is the de-collapsed setting:
 # proper Tikhonov removes the brittle inter-shell near-cancellation at near-zero data cost
-# (see configs/ablation_real_lunar_regularization.yaml).
+# (see configs/ablation/ablation_real_lunar_regularization.yaml).
 experiment:
   name: real_lunar_ridge_baseline
   kind: single

@@ -5,8 +5,8 @@
 # quick: a coarse lambda_l2 sweep that shows shell_cancellation_ratio collapsing from
 #        ~143 to ~4 with the relative acceleration RMSE essentially unchanged.
 # full : cartesian grid over lambda_l2 x shell_energy_weight x lambda_moment.
-# Run quick:  python -m vesp.training.run_ablation --config configs/ablation_real_lunar_regularization.yaml
-# Run full :  python -m vesp.training.run_ablation --config configs/ablation_real_lunar_regularization.yaml --mode full
+# Run quick:  python -m vesp.training.run_ablation --config configs/ablation/ablation_real_lunar_regularization.yaml
+# Run full :  python -m vesp.training.run_ablation --config configs/ablation/ablation_real_lunar_regularization.yaml --mode full
 ablation:
   mode: quick
   output_dir: outputs/ablation_real_lunar_regularization

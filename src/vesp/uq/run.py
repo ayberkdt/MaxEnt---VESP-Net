@@ -1,7 +1,7 @@
 """Driver for the VESP-UQ IAC experiments: standalone calibration + trajectory risk screening.
 
-    python -m vesp.uq.run --config configs/vespuq_real_lunar.yaml
-    python -m vesp.uq.run --config configs/vespuq_smoke.yaml
+    python -m vesp.uq.run --config configs/vespuq/vespuq_real_lunar.yaml
+    python -m vesp.uq.run --config configs/vespuq/vespuq_smoke.yaml
 
 Runs the two experiments the plan calls minimal:
 

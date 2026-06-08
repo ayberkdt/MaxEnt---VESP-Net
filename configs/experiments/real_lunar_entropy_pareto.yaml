@@ -9,7 +9,7 @@
 # real_lunar_ridge_baseline.yaml). Entropy is tested ON TOP of an already de-collapsed
 # fit, which is the scientifically honest "does MaxEnt add value beyond ridge" comparison.
 # An intentionally under-regularized variant is kept separately as
-# configs/maxent_pareto_real_lunar_lowl2_stress_test.yaml (clearly marked stress test).
+# configs/real_lunar/maxent_pareto_real_lunar_lowl2_stress_test.yaml (clearly marked stress test).
 #
 # Headline question: at entropy_weight = 0 the data fit must match the ridge baseline; a
 # useful MaxEnt regime exists only if entropy improves source-distribution health

@@ -1,22 +1,37 @@
-# MaxEnt-VESP Stage 1-2 Feasibility Framework
+# MaxEnt-VESP / VESP-UQ
+
+Equivalent-source modeling of lunar residual gravity: a deterministic feasibility framework
+plus a surrogate-agnostic uncertainty / risk-calibration layer, sharing one core — interior
+equivalent sources that reproduce an *exterior* residual gravity field.
 
 ## What Is This?
 
-This repository is an early research framework for MaxEnt-VESP / VESP-Net. It
-does not yet implement the full MaxEnt posterior framework. It implements the
-Stage 1-2 feasibility framework for discrete equivalent-source gravity modeling.
-This repository still does not implement full MaxEnt-VESP.
+The repository now has **two pillars** built on the same equivalent-source core:
 
-The first question is deliberately narrow:
+1. **Feasibility framework (Stage 1-3A)** — deterministic single/multi-shell equivalent-source
+   ridge/Tikhonov fitting, with entropy regularization kept only as an ablation. It answers a
+   deliberately narrow question:
 
-```text
-Can fixed interior equivalent sources represent an exterior residual gravity
-field accurately and stably enough to justify later MaxEnt / neural extensions?
-```
+   ```text
+   Can fixed interior equivalent sources represent an exterior residual gravity field
+   accurately and stably enough to justify later MaxEnt / neural extensions?
+   ```
 
-The next scientific decision is whether deterministic single-shell and
-multi-shell equivalent-source VESP represent hard synthetic and real SH
-residual fields accurately enough to justify Stage 3 entropy regularization.
+   The follow-up decision is whether deterministic single- and multi-shell VESP represent hard
+   synthetic and real spherical-harmonic residual fields well enough to justify entropy
+   regularization. (Original scope; the rest of this README documents it in detail.)
+
+2. **VESP-UQ layer (`vesp.uq`)** — the current direction. Because the entropy point-estimate did
+   **not** beat well-regularized ridge on accuracy, the equivalent-source machinery is reframed as
+   an uncertainty layer: given any residual-gravity surrogate's error
+   `e_a(x) = a_reference(x) - a_surrogate(x)`, VESP-UQ fits a calibrated equivalent-source
+   posterior, produces altitude-aware predictive uncertainty, and screens trajectories for
+   selective high-fidelity rerun. See the
+   [VESP-UQ section](#vesp-uq-equivalent-source-uncertainty-calibration-layer) and
+   [`docs/VESP_UQ_IAC_PLAN.md`](docs/VESP_UQ_IAC_PLAN.md).
+
+This repository does **not** implement the full probabilistic MaxEnt-VESP-Net vision; the scope
+and binding claim boundaries are detailed below.
 
 ## Current Scientific Scope
 
@@ -68,8 +83,8 @@ score = plugin.score_trajectory(orbit_positions)      # aggregate risk along a t
 Run the two minimal IAC experiments (standalone calibration + trajectory risk screening):
 
 ```text
-python -m vesp.uq.run --config configs/vespuq_smoke.yaml        # tiny synthetic, finishes in seconds
-python -m vesp.uq.run --config configs/vespuq_real_lunar.yaml   # GRAIL gl0420a residual
+python -m vesp.uq.run --config configs/vespuq/vespuq_smoke.yaml        # tiny synthetic, finishes in seconds
+python -m vesp.uq.run --config configs/vespuq/vespuq_real_lunar.yaml   # GRAIL gl0420a residual
 ```
 
 Each run writes a JSON + Markdown report (with an IAC claim summary) plus CSV tables:
@@ -145,18 +160,25 @@ src/vesp/
                    summarize.py  standardized summary row + suite CSV/MD/Pareto + plots
                    suites.py     named suites (synthetic, real_lunar, ci, all)
     app/         ui.py (PyQt6 workbench)
-    uq/          uncertainty quantification and trajectory risk scoring (Phase 2)
-                   plugin.py     VESPUQPlugin (the core calibration layer)
-                   trajectory.py risk screening for orbit trajectories
-                   run.py        standalone UQ evaluation pipeline
-                   data.py       UQ-specific data loaders and caching
-                   metrics.py    UQ-specific metrics (PICP, NLL, z_std)
-                   ensemble.py   ensemble utilities for UQ
+    uq/          VESP-UQ: surrogate-agnostic uncertainty / risk-calibration layer
+                   plugin.py     VESPUQPlugin: fit / predict_uncertainty /
+                                 predict_covariance_3x3 / score_trajectory
+                   trajectory.py trajectory risk scoring + selective rerun (run_risk_screening)
+                   ensemble.py   synthetic orbit ensemble + nearest-neighbour ground-truth error
+                   data.py       surrogate-agnostic UQSamples loader (error / ref-surrogate modes)
+                   metrics.py    vector (ellipsoid / Mahalanobis chi-square-3) calibration metrics
+                   run.py        IAC driver: calibration + screening -> JSON / MD / CSV reports
 
-configs/         experiment YAML configs (single source of truth)
+configs/         experiment YAML configs (single source of truth), grouped by purpose
+  feasibility/   Stage 1-2 deterministic synthetic + stress configs
+  real_lunar/    Stage 2-3 real GRAIL gl0420a runs (ridge / maxent / pareto)
+  ablation/      real-lunar ablation studies (shells / regularization / low-alt weighting)
+  uncertainty/   Stage 3C posterior-calibration configs
+  vespuq/        VESP-UQ layer configs (vespuq_smoke + vespuq_real_lunar)
   experiments/   the falsifiable experiment configs (E0-E5 families)
 scripts/         dataset builders and orchestration helpers
-                 run_experiment_suite.py / summarize_experiments.py
+                 run_experiment_suite.py / summarize_experiments.py / run_vespuq.py
+docs/            SCIENTIFIC_CLAIMS.md + VESP_UQ_IAC_PLAN.md + VESP_UQ_LIMITATIONS.md
 tests/           pytest suite
 data/            input gravity models and prepared residual CSVs
 outputs/         generated run artifacts (git-ignored)
@@ -407,7 +429,7 @@ ships a known under-regularized setting:
 | `real_lunar_entropy_pareto.yaml` | E5 | entropy on top of the **conservative L2 baseline** |
 
 Intentionally under-regularized configs are clearly marked, e.g.
-`configs/maxent_pareto_real_lunar_lowl2_stress_test.yaml` — their numbers must not be
+`configs/real_lunar/maxent_pareto_real_lunar_lowl2_stress_test.yaml` — their numbers must not be
 cited as the method's performance.
 
 ### PyQt workbench (UI)
@@ -456,19 +478,19 @@ python scripts/pre_results_check.py
 ## Running Stage 1 Single-Shell Experiment
 
 ```powershell
-python -m vesp.training.train --config configs/discrete_single_shell.yaml
+python -m vesp.training.train --config configs/feasibility/discrete_single_shell.yaml
 ```
 
 ## Running Stage 2 Multi-Shell Experiment
 
 ```powershell
-python -m vesp.training.train --config configs/discrete_multishell.yaml
+python -m vesp.training.train --config configs/feasibility/discrete_multishell.yaml
 ```
 
 ## Running Ablations
 
 ```powershell
-python run_ablation.py --config configs/synthetic_stress_multishell.yaml
+python run_ablation.py --config configs/feasibility/synthetic_stress_multishell.yaml
 ```
 
 The ablation output includes:
@@ -506,17 +528,17 @@ Before considering Stage 3 MaxEnt, run the deterministic ablations (each support
 fast `quick` mode and an exhaustive `--mode full`):
 
 ```powershell
-python -m vesp.training.run_ablation --config configs/ablation_real_lunar_regularization.yaml
-python -m vesp.training.run_ablation --config configs/ablation_real_lunar_shells.yaml
-python -m vesp.training.run_ablation --config configs/ablation_real_lunar_lowalt_weighting.yaml
+python -m vesp.training.run_ablation --config configs/ablation/ablation_real_lunar_regularization.yaml
+python -m vesp.training.run_ablation --config configs/ablation/ablation_real_lunar_shells.yaml
+python -m vesp.training.run_ablation --config configs/ablation/ablation_real_lunar_lowalt_weighting.yaml
 ```
 
 Optional low-altitude weighted training (boosts low-altitude rows in the solve only;
 reported metrics stay in raw units):
 
 ```powershell
-python -m vesp.training.train --config configs/real_lunar_gl0420a_lowalt_weighted.yaml
-python -m vesp.training.train --config configs/real_lunar_gl0420a_multishell_lowalt_weighted.yaml
+python -m vesp.training.train --config configs/real_lunar/real_lunar_gl0420a_lowalt_weighted.yaml
+python -m vesp.training.train --config configs/real_lunar/real_lunar_gl0420a_multishell_lowalt_weighted.yaml
 ```
 
 If the best **non-collapsed** deterministic run still has unacceptable low-altitude
@@ -559,13 +581,13 @@ Entropy modes (`loss.entropy_mode`):
 Single MaxEnt run:
 
 ```powershell
-python -m vesp.training.train --config configs/maxent_real_lunar_gl0420a_multishell.yaml
+python -m vesp.training.train --config configs/real_lunar/maxent_real_lunar_gl0420a_multishell.yaml
 ```
 
 Data-error vs entropy Pareto sweep (the principled way to choose `entropy_weight`):
 
 ```powershell
-python -m vesp.training.maxent_pareto --config configs/maxent_pareto_real_lunar.yaml
+python -m vesp.training.maxent_pareto --config configs/real_lunar/maxent_pareto_real_lunar.yaml
 ```
 
 Outputs:
@@ -610,7 +632,7 @@ The posterior **mean is exactly the ridge point estimate** (accuracy unchanged);
 covariance gives predictive error bars. Run the calibration evaluation:
 
 ```powershell
-python -m vesp.training.uncertainty --config configs/uncertainty_synthetic_ood.yaml
+python -m vesp.training.uncertainty --config configs/uncertainty/uncertainty_synthetic_ood.yaml
 ```
 
 It reports, per altitude band, the predictive RMSE, mean predictive / epistemic std,
@@ -627,7 +649,7 @@ leaves the low-altitude band overconfident (the model misfit grows toward the su
 (`h = r − 1`), fit on held-out validation residuals (post-hoc variance recalibration):
 
 ```powershell
-python -m vesp.training.uncertainty --config configs/uncertainty_real_lunar.yaml
+python -m vesp.training.uncertainty --config configs/uncertainty/uncertainty_real_lunar.yaml
 ```
 
 On the real lunar (in-distribution, all altitudes in training) this **calibrates every altitude
@@ -737,7 +759,7 @@ mild redundancy of adjacent shells. Two changes encode this:
 Run the compact decision suite:
 
 ```powershell
-python -m vesp.training.feasibility --config configs/feasibility_suite.yaml
+python -m vesp.training.feasibility --config configs/feasibility/feasibility_suite.yaml
 ```
 
 It tests:
@@ -849,9 +871,9 @@ acceleration RMS, finite-difference step, reference radius, and GM.
 Real-data fitting templates:
 
 ```powershell
-python -m vesp.training.train --config configs/real_lunar_gl0420a.yaml
-python -m vesp.training.train --config configs/real_lunar_gl0420a_ood.yaml
-python -m vesp.training.train --config configs/real_lunar_gl0420a_multishell.yaml
+python -m vesp.training.train --config configs/real_lunar/real_lunar_gl0420a.yaml
+python -m vesp.training.train --config configs/real_lunar/real_lunar_gl0420a_ood.yaml
+python -m vesp.training.train --config configs/real_lunar/real_lunar_gl0420a_multishell.yaml
 ```
 
 ## Lunar Metadata Contract

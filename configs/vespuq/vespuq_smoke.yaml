@@ -1,5 +1,5 @@
 # VESP-UQ smoke config -- tiny synthetic run for CI / quick checks.
-#   python -m vesp.uq.run --config configs/vespuq_smoke.yaml
+#   python -m vesp.uq.run --config configs/vespuq/vespuq_smoke.yaml
 #
 # Generates a small synthetic error field (interior truth sources + noise), fits the layer,
 # runs calibration + a small trajectory ensemble, and writes all artifacts. Finishes in seconds.

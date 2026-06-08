@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def main() -> None:
     print("[DEPRECATED] scripts/run_feasibility.py -> prefer scripts/run_experiment_suite.py --suite synthetic")
-    subprocess.check_call([sys.executable, "-m", "vesp.training.feasibility", "--config", "configs/feasibility_suite.yaml"], cwd=ROOT)
+    subprocess.check_call([sys.executable, "-m", "vesp.training.feasibility", "--config", "configs/feasibility/feasibility_suite.yaml"], cwd=ROOT)
 
 
 if __name__ == "__main__":

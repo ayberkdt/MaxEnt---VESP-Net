@@ -493,7 +493,7 @@ def run(config: dict, *, model_cls=DiscreteVESP) -> dict:
 
 def main(argv: Iterable[str] | None = None) -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config", default="configs/discrete_single_shell.yaml")
+    parser.add_argument("--config", default="configs/feasibility/discrete_single_shell.yaml")
     args = parser.parse_args(argv)
     run(load_config(args.config))
 

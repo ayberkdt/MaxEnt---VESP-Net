@@ -2,7 +2,7 @@
 # Compares candidate interior shell radius sets (incl. legacy S1 and new default S3)
 # under fixed conservative regularization. shell_energy_weights is given as a single
 # scalar so it broadcasts to whatever shell count each trial uses (e.g. 4-shell S4).
-# Run:  python -m vesp.training.run_ablation --config configs/ablation_real_lunar_shells.yaml [--mode full]
+# Run:  python -m vesp.training.run_ablation --config configs/ablation/ablation_real_lunar_shells.yaml [--mode full]
 ablation:
   mode: quick
   output_dir: outputs/ablation_real_lunar_shells

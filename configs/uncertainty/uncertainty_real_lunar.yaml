@@ -1,5 +1,5 @@
 # Stage 3C+ — Heteroscedastic (altitude-dependent) posterior calibration on real lunar.
-#   python -m vesp.training.uncertainty --config configs/uncertainty_real_lunar.yaml
+#   python -m vesp.training.uncertainty --config configs/uncertainty/uncertainty_real_lunar.yaml
 #
 # GRAIL-derived band-limited residual, RANDOM split (all altitudes appear in training), so the
 # altitude-dependent model misfit can be learned and the per-altitude-band calibration is

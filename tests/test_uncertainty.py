@@ -140,7 +140,7 @@ def test_crps_on_calibrated_unit_gaussian():
 
 
 def test_uncertainty_eval_epistemic_grows_toward_low_altitude():
-    cfg = load_config(ROOT / "configs" / "uncertainty_synthetic_ood.yaml")
+    cfg = load_config(ROOT / "configs" / "uncertainty" / "uncertainty_synthetic_ood.yaml")
     report = run_uncertainty_eval(cfg)
     bands = report["bands"]
     assert {"val", "test_low", "test_high"} <= set(bands)

@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_run_smoke_writes_all_artifacts(tmp_path):
-    cfg = load_config(ROOT / "configs" / "vespuq_smoke.yaml")
+    cfg = load_config(ROOT / "configs" / "vespuq" / "vespuq_smoke.yaml")
     cfg["output"]["output_dir"] = str(tmp_path)
     cfg["output"]["run_name"] = "smoke"
     report = run(cfg)
@@ -46,7 +46,7 @@ def test_run_smoke_writes_all_artifacts(tmp_path):
 
 
 def test_trajectory_scores_csv_has_expected_columns(tmp_path):
-    cfg = load_config(ROOT / "configs" / "vespuq_smoke.yaml")
+    cfg = load_config(ROOT / "configs" / "vespuq" / "vespuq_smoke.yaml")
     cfg["output"]["output_dir"] = str(tmp_path)
     cfg["output"]["run_name"] = "smoke2"
     run(cfg)

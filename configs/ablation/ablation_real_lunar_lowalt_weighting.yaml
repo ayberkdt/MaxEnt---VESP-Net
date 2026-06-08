@@ -1,6 +1,6 @@
 # Low-altitude weighting ablation for the real lunar single-shell fit.
 # Sweeps the low-altitude boost factor; boost=1.0 is the unweighted baseline.
-# Run:  python -m vesp.training.run_ablation --config configs/ablation_real_lunar_lowalt_weighting.yaml [--mode full]
+# Run:  python -m vesp.training.run_ablation --config configs/ablation/ablation_real_lunar_lowalt_weighting.yaml [--mode full]
 ablation:
   mode: quick
   output_dir: outputs/ablation_real_lunar_lowalt_weighting
