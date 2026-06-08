@@ -178,3 +178,36 @@ def test_ui_plot_gallery_lists_and_previews_png(qapp, monkeypatch, tmp_path):
         assert window.plot_list.count() == 1
         assert window.analysis_tabs.tabText(2) == "Plots (1)"
         assert window.plot_preview.pixmap() is not None
+
+
+def test_ui_experiment_config_routes_to_suite_runner(qapp, monkeypatch, tmp_path):
+    for window in _window(qapp, monkeypatch, tmp_path):
+        window._load_config(ui.EXPERIMENTS_CONFIG_ROOT / "synthetic_l2_sweep.yaml")
+        assert window._is_experiment_config(window._read_editor_config())
+
+        exp_called = []
+        train_called = []
+        monkeypatch.setattr(window, "_run_experiment_config", lambda: exp_called.append(True))
+        monkeypatch.setattr(window, "_run_training", lambda module: train_called.append(module))
+        window._run_selected_config()
+        assert exp_called == [True]
+        assert train_called == []
+
+
+def test_ui_suite_summary_loads_into_table(qapp, monkeypatch, tmp_path):
+    suite_dir = tmp_path / "suites" / "demo"
+    suite_dir.mkdir(parents=True)
+    cols = ui.VespWorkbench.SUITE_TABLE_COLUMNS
+    lines = [",".join(cols)]
+    for name, rel in (("r1", "0.12"), ("r2", "0.34")):
+        row = {c: "" for c in cols}
+        row.update({"run_name": name, "solver": "ridge", "relative_acceleration_rmse": rel, "acceptability_status": "GOOD"})
+        lines.append(",".join(str(row[c]) for c in cols))
+    (suite_dir / "suite_summary.csv").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    for window in _window(qapp, monkeypatch, tmp_path):
+        window._load_suite_outputs(suite_dir)
+        assert window.suite_table.rowCount() == 2
+        assert window.suite_table.item(0, 0).text() == "r1"
+        assert window.suite_tabs.tabText(0) == "Summary (2)"
+        assert window.suite_dir_label.text().endswith("demo")

@@ -89,7 +89,10 @@ def test_moment_regularization_reduces_monopole_leakage():
         source_positions,
         source_weights,
         shell_ids,
-        RidgeSolveConfig(method="augmented_lstsq", column_normalize=False),
+        # tiny L2 makes the underdetermined solve pick the unique min-norm solution [1, 0]
+        # deterministically; without it, lstsq's tie-breaking among equivalent zero-residual
+        # solutions is non-contractual and can vary with global linalg state.
+        RidgeSolveConfig(method="augmented_lstsq", column_normalize=False, lambda_l2=1.0e-9),
     )
     with_moment = solve_discrete_ridge(
         K,
