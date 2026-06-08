@@ -18,6 +18,53 @@ The next scientific decision is whether deterministic single-shell and
 multi-shell equivalent-source VESP represent hard synthetic and real SH
 residual fields accurately enough to justify Stage 3 entropy regularization.
 
+## Current Scientific Scope
+
+This repository implements a **deterministic feasibility framework** for MaxEnt-VESP.
+It is **not** the full final probabilistic MaxEnt-VESP-Net vision. Concretely:
+
+- The current model solves **deterministic equivalent-source inverse problems**
+  (ridge / Tikhonov, with optional moment constraints).
+- The current MaxEnt component is **Stage 3A: deterministic entropy-regularized point
+  estimation** over the solved source strengths.
+- It is **not** yet a calibrated posterior distribution.
+- The learned source map is **not** a true internal mass-density reconstruction. It is
+  an **equivalent mathematical source distribution** that reproduces the *exterior*
+  residual gravity field.
+
+Implemented now: deterministic discrete equivalent-source VESP; single-shell and
+multi-shell source fitting; Newtonian potential kernel; analytic acceleration kernel;
+unit-safe potential/acceleration scaling; diagnostics for source collapse, shell
+cancellation, and monopole/dipole leakage; deterministic entropy regularization over
+source strengths.
+
+Not implemented yet: full Bayesian/MaxEnt posterior; neural source-density network;
+probabilistic `q(sigma | data)`; acceleration covariance; orbit-propagation
+uncertainty; irregular-body source placement.
+
+The binding policy on what may and may not be claimed is
+[`docs/SCIENTIFIC_CLAIMS.md`](docs/SCIENTIFIC_CLAIMS.md).
+
+## Experimental Questions
+
+The point of the framework is to make the MaxEnt-VESP idea **falsifiable**. Each
+question maps to a concrete, repeatable experiment (see
+[Experiment Framework](#experiment-framework)):
+
+| ID | Question | Experiment |
+| --- | --- | --- |
+| Q1 | Can a fixed-source equivalent-source model reproduce a known synthetic exterior residual field? | E0 `synthetic_exact_recovery` |
+| Q2 | How sensitive is the fit to source-shell radius mismatch? | E1 `synthetic_shell_radius_mismatch` |
+| Q3 | Does multi-shell fitting improve accuracy or create shell cancellation? | E2 `synthetic_multishell_truth` |
+| Q4 | How much L2 regularization is needed to suppress ill-conditioned source solutions? | E3 `synthetic_l2_sweep` / `real_lunar_l2_sweep` |
+| Q5 | Does entropy regularization improve source-distribution health at acceptable data-error cost? | E4 `synthetic_entropy_pareto` / `real_lunar_entropy_pareto` |
+| Q6 | On lunar band-limited residual data, is the method numerically stable across altitude bands? | E5 real lunar proof-of-concept |
+
+The central comparison the suite is designed to make is:
+**does the MaxEnt (entropy) component add value beyond a classical, well-regularized
+ridge/Tikhonov equivalent-source fit?** `entropy_weight = 0` is, by construction, exactly
+the ridge baseline, so every entropy run is measured against it.
+
 ## Project Structure
 
 The code is packaged as `vesp` under a `src/` layout. Modules are grouped by
@@ -52,12 +99,19 @@ src/vesp/
                    train_multishell.py / run_ablation.py / feasibility.py
                    evaluate.py       evaluation + artifact writing
     analysis/    analysis.py, advanced_analysis.py (reports / plots / PDF)
-    extensions/  Stage-3 scaffolds: entropy, neural_density,
+    extensions/  Stage-3 scaffolds: entropy (Stage 3A, active), neural_density,
                  probabilistic, force_model (not the full MaxEnt framework)
+    experiments/ experiment-first orchestration
+                   registry.py   catalogue of core experiments E0-E5 / questions Q1-Q6
+                   runner.py     load experiment YAML, expand sweeps, run trials
+                   summarize.py  standardized summary row + suite CSV/MD/Pareto + plots
+                   suites.py     named suites (synthetic, real_lunar, ci, all)
     app/         ui.py (PyQt6 workbench)
 
 configs/         experiment YAML configs (single source of truth)
+  experiments/   the falsifiable experiment configs (E0-E5 families)
 scripts/         dataset builders and orchestration helpers
+                 run_experiment_suite.py / summarize_experiments.py
 tests/           pytest suite
 data/            input gravity models and prepared residual CSVs
 outputs/         generated run artifacts (git-ignored)
@@ -244,6 +298,104 @@ pip install -r requirements.txt
 pip install -e .
 ```
 
+## Experiment Framework
+
+The experiment-first entry point is `scripts/run_experiment_suite.py`. It loads one or
+more experiment configs from `configs/experiments/`, expands any parameter sweep, runs
+each trial through the same deterministic solve/evaluate pipeline, and writes a combined
+summary.
+
+Run a single core experiment by id (E0–E5):
+
+```powershell
+python scripts/run_experiment_suite.py --experiment E0      # synthetic sanity check
+python scripts/run_experiment_suite.py --experiment E3      # synthetic L2 sweep
+python scripts/run_experiment_suite.py --experiment E4      # synthetic entropy Pareto
+```
+
+Run an experiment config directly, a named suite, or a fast subsampled pass:
+
+```powershell
+python scripts/run_experiment_suite.py --config configs/experiments/synthetic_l2_sweep.yaml
+python scripts/run_experiment_suite.py --suite synthetic
+python scripts/run_experiment_suite.py --suite real_lunar
+python scripts/run_experiment_suite.py --suite ci --quick   # tiny pass for CI / pre-results
+```
+
+Real lunar proof-of-concept (E5) — the GRAIL-derived band-limited residual target,
+**not** an internal density reconstruction:
+
+```powershell
+python scripts/run_experiment_suite.py --config configs/experiments/real_lunar_ridge_baseline.yaml
+python scripts/run_experiment_suite.py --config configs/experiments/real_lunar_l2_sweep.yaml
+python scripts/run_experiment_suite.py --config configs/experiments/real_lunar_entropy_pareto.yaml
+```
+
+Each run writes per-run artifacts under `outputs/suites/<suite>/runs/<run_name>/`
+(`config.yaml`, `metrics.json`, `diagnostics.json`, `summary.txt`, `shell_energy.csv`,
+`altitude_binned_error.csv`, `target_scales.json`, `run_manifest.json`). Each suite
+writes `suite_summary.csv`, `suite_summary.md`, `pareto_data.csv`, `README.md`, and
+optional plots (`*_vs_lambda_l2.png`, `*_vs_entropy_weight.png`, Pareto). Every summary
+row records the git commit, timestamp, config path, solver, shell radii, source count,
+`lambda_l2`, `entropy_weight`, `entropy_mode`, the full error/altitude/entropy/source
+diagnostics, and the screening `acceptability_status`.
+
+Re-summarize existing runs (regenerate tables/plots without re-running):
+
+```powershell
+python scripts/summarize_experiments.py --runs-dir outputs/suites/synthetic/runs
+```
+
+### Experiment config families
+
+`configs/experiments/` separates ridge baselines from MaxEnt configs and never silently
+ships a known under-regularized setting:
+
+| Config | Experiment | Notes |
+| --- | --- | --- |
+| `synthetic_exact_recovery.yaml` | E0 | identical truth/model geometry; correctness sanity check |
+| `synthetic_shell_radius_mismatch.yaml` | E1 | sweep `model.shell_alpha` vs fixed truth |
+| `synthetic_multishell_truth.yaml` | E2 | multi-shell truth; weak vs strong L2 cancellation test |
+| `synthetic_l2_sweep.yaml` | E3 | Tikhonov sweep `1e-10 … 100` |
+| `synthetic_entropy_pareto.yaml` | E4 | entropy weight × mode at a **fixed conservative L2** baseline |
+| `real_lunar_ridge_baseline.yaml` | E5 | conservative `lambda_l2 = 30` multi-shell ridge |
+| `real_lunar_l2_sweep.yaml` | E5 | real-data L2 sweep (basis for the default `30`) |
+| `real_lunar_entropy_pareto.yaml` | E5 | entropy on top of the **conservative L2 baseline** |
+
+Intentionally under-regularized configs are clearly marked, e.g.
+`configs/maxent_pareto_real_lunar_lowl2_stress_test.yaml` — their numbers must not be
+cited as the method's performance.
+
+### PyQt workbench (UI)
+
+The workbench is experiment-aware:
+
+```powershell
+python -m vesp.app.ui
+```
+
+- The **Run** tab's preset dropdown now lists the `Exp E0…E5` configs; selecting one and
+  pressing Run routes it through `scripts/run_experiment_suite.py` automatically.
+- The **Experiments** tab runs a whole named suite (with a Quick toggle), then loads the
+  combined `suite_summary.csv` into a table and shows the suite's L2 / entropy Pareto
+  plots inline.
+
+### Deprecated entry points (still working)
+
+The experiment framework supersedes the older one-off runners. They are
+**deprecated, not removed** — they still run but print a deprecation banner pointing to
+the new command:
+
+| Deprecated | Use instead |
+| --- | --- |
+| `vesp.training.run_ablation` / `run_ablation.py` | `run_experiment_suite.py --experiment E3` |
+| `vesp.training.maxent_pareto` | `run_experiment_suite.py --experiment E4` |
+| `vesp.training.feasibility` / `run_feasibility.py` | `run_experiment_suite.py --suite synthetic` |
+| `scripts/run_stage1.py` / `run_stage2.py` / `run_all_stage*.py` | `run_experiment_suite.py` / `pre_results_check.py` |
+
+The core single-run path `vesp.training.train` (and `train_discrete.py` /
+`train_multishell.py`) is **not** deprecated — the experiment runner uses it internally.
+
 ## Running Smoke Tests
 
 ```powershell
@@ -392,6 +544,108 @@ MaxEnt entropy over `sigma` is a complementary regularizer, but on this dataset 
 pathology there is a brittle inter-shell near-cancellation caused by under-regularization,
 which proper Tikhonov (`lambda_l2`) removes at essentially zero data cost. Use MaxEnt as
 a secondary tool once the L2 regularization is set correctly.
+
+## Stage 3C: Calibrated Posterior Uncertainty (MaxEnt as uncertainty, not RMSE)
+
+Deterministic *point-estimate* MaxEnt (maximizing entropy over the sources) was tested
+rigorously and found **strictly dominated by ridge** on out-of-distribution generalization
+(experiment E6 `synthetic_maxent_constrained_ood`): at matched in-sample fit, ridge's
+held-out low-altitude error is ~2× lower. Entropy spreads source mass, but the
+low-altitude regime needs localization. So entropy-as-a-regularizer does not earn its
+place.
+
+MaxEnt's classical value was never point-estimate accuracy — it is **calibrated
+uncertainty**. Because the model is linear in `sigma`, the maximum-entropy posterior under
+a Gaussian likelihood + L2 prior is the exact conjugate Gaussian:
+
+```text
+sigma ~ N(mu, Sigma),   Sigma = noise_var * (A^T A + lambda I)^-1,   mu = ridge solution
+```
+
+The posterior **mean is exactly the ridge point estimate** (accuracy unchanged); the
+covariance gives predictive error bars. Run the calibration evaluation:
+
+```powershell
+python -m vesp.training.uncertainty --config configs/uncertainty_synthetic_ood.yaml
+```
+
+It reports, per altitude band, the predictive RMSE, mean predictive / epistemic std,
+`z_std` (≈1 if calibrated), interval coverage `picp_50/68/90/95`, and Gaussian NLL. On the
+synthetic OOD case the epistemic std grows ≈86× from the high-altitude to the low-altitude
+band — the posterior **flags where it is extrapolating**, which a bare ridge cannot.
+
+The hyperparameters (noise variance + prior precision) are selected by **empirical-Bayes
+evidence maximization** (`uncertainty.hyperparams: evidence`, MacKay).
+
+**Stage 3C+ — heteroscedastic (altitude-dependent) calibration.** A single global noise term
+leaves the low-altitude band overconfident (the model misfit grows toward the surface). Setting
+`uncertainty.noise_model: heteroscedastic` adds a predictive noise `floor + a·h^(-b)`
+(`h = r − 1`), fit on held-out validation residuals (post-hoc variance recalibration):
+
+```powershell
+python -m vesp.training.uncertainty --config configs/uncertainty_real_lunar.yaml
+```
+
+On the real lunar (in-distribution, all altitudes in training) this **calibrates every altitude
+band**: the low band goes from PICP90 0.53 / z_std 4.13 → **0.86 / 1.22**, mid 0.74 → **0.93**,
+high stays ~1.0; the report prints the per-band before/after. On a pure altitude-OOD split the
+calibration must extrapolate the noise law into an unseen band and is fundamentally limited (it
+keeps the floor but cannot conjure the missing band) — reported honestly. See
+[`docs/SCIENTIFIC_CLAIMS.md`](docs/SCIENTIFIC_CLAIMS.md) for exactly what may be claimed.
+
+### Automatic regularization (`lambda_l2: auto`)
+
+Ridge configs may set `solver.lambda_l2: auto` (and `loss.lambda_l2: auto`) to pick the
+Tikhonov weight at the **L-curve corner** automatically instead of hand-tuning it
+(`vesp/core/regularization.py`). On the synthetic multi-shell case it lands at λ≈1e-3, in
+the stable knee (`shell_cancellation_ratio`≈1.7, `sigma_l2`≈4.8). The chosen value is
+recorded as `selected_lambda_l2` in `metrics.json`.
+
+### E7 — Regularizer Shootout (L2 vs entropy at matched error)
+
+Because ridge is the accuracy ceiling, MaxEnt is fairly judged not on error but on whether
+it buys more *source-health* per unit of (tolerable) extra error. E7 formalizes that:
+
+```powershell
+python scripts/regularizer_shootout.py --config configs/experiments/synthetic_regularizer_shootout.yaml
+```
+
+It runs a ridge L2 sweep and a constrained-MaxEnt sweep, aligns them by data error, and
+writes `shootout_verdict.md` comparing health (`shell_cancellation_ratio`, `sigma_l2`,
+`top_5pct_source_contribution`, `effective_source_count`).
+
+The verdict **depends on the pathology**, and the two shipped setups make this explicit:
+
+- **collapse / norm disease** (`synthetic_regularizer_shootout.yaml`): **L2 wins 18–2**. The
+  brittle cancellation is a source-*norm* problem; L2 penalizes the norm directly while
+  entropy only reshapes the distribution at fixed magnitude (it leaves `sigma_l2` ≈ collapsed).
+- **concentration setup** (`synthetic_regularizer_shootout_concentrated.yaml`): **entropy wins
+  10–6**, sweeping `top_5pct_source_contribution` and `effective_source_count` 5–0. Entropy has
+  a genuine niche — *de-concentration of source mass*, a health axis L2 does not control
+  directly — though it costs more data error and does not help cancellation.
+
+So entropy is not useless: it is the right tool for concentration and the wrong tool for the
+norm/cancellation collapse. A real-lunar variant (`real_lunar_regularizer_shootout.yaml`) runs
+the same comparison on GRAIL data.
+
+### E8 — Source Geometry Shootout (is the low-altitude bottleneck geometry?)
+
+E7 showed the low-altitude bottleneck is *not* a regularization problem. The forward
+hypothesis is that it is a **representation / source-geometry** problem (the equivalent-source
+model cannot capture the near-surface high-frequency residual). E8 tests this:
+
+```powershell
+python scripts/geometry_shootout.py --config configs/experiments/synthetic_geometry_shootout.yaml --with-calibration
+```
+
+It compares source geometries (`single`, `multi_baseline`, `deep_only`, `surface_dense`,
+`multi_resolution`, `denser`) — **each with `lambda_l2: auto`** so every geometry is fairly
+(L-curve) regularized and regularization is not a confound — and ranks them by held-out
+low-altitude error (`geometry_verdict.md`, `geometry_ranking.csv`). Geometries are config-only
+(`make_shell_sources` already supports arbitrary interior radii and per-shell counts). With
+`--with-calibration` it also reports per-band Stage 3C calibration for the best vs baseline
+geometry (does better geometry → better-calibrated low altitude?). A real-lunar variant
+(`real_lunar_geometry_shootout.yaml`) runs the same comparison on GRAIL data.
 
 ## Diagnosing Multi-Shell Collapse
 

@@ -9,8 +9,14 @@
 # IMPORTANT: the entropy_weight below is a single operating point. The principled way
 # to choose it is the data-error vs entropy Pareto sweep:
 #   python -m vesp.training.maxent_pareto --config configs/maxent_pareto_real_lunar.yaml
-# On this dataset the sweep shows the collapse is data-driven and only breaks at a steep
-# data cost, which is the quantitative justification for Stage 3B (neural density).
+#
+# L2 CONSISTENCY (fixed): lambda_l2 is the CONSERVATIVE BASELINE value 30.0, matching the
+# ridge default (configs/real_lunar_gl0420a_multishell.yaml). Earlier revisions of this
+# file used a known under-regularized lambda_l2 = 1e-5, which made the MaxEnt run and the
+# ridge baseline incomparable (the ridge baseline had already removed the brittle
+# inter-shell near-cancellation that 1e-5 leaves in). Entropy is now tested ON TOP of a
+# de-collapsed fit. The under-regularized behavior is preserved, clearly labelled, in
+# configs/maxent_pareto_real_lunar_lowl2_stress_test.yaml.
 seed: 42
 device: cpu
 dtype: float64
@@ -44,7 +50,7 @@ kernel:
 solver:
   type: maxent
   ridge_method: augmented_lstsq
-  lambda_l2: 1.0e-5
+  lambda_l2: 30.0
   column_normalize: true
 
 loss:
@@ -55,7 +61,7 @@ loss:
   acceleration_scale: auto
   lambda_potential: 0.2
   lambda_acceleration: 1.0
-  lambda_l2: 1.0e-5
+  lambda_l2: 30.0
   lambda_moment: 1.0e-4
   lambda_dipole: 1.0
   shell_energy_weights: []

@@ -1,0 +1,87 @@
+# E8 — Source Geometry Shootout (real lunar, GRAIL-derived band-limited residual).
+#   python scripts/geometry_shootout.py --config configs/experiments/real_lunar_geometry_shootout.yaml
+#
+# Same geometry families as the synthetic E8, on the actual target (GRAIL gl0420a L2-60
+# residual). Heavier; NOT part of CI. lambda_l2: auto (L-curve) per geometry so each is fairly
+# regularized. Random split here (the CSV is not altitude-OOD); low-altitude is read from the
+# low band of the val split (low_altitude_acceleration_rmse + low_to_high_error_ratio).
+# Target wording: GRAIL-derived band-limited lunar residual; NOT an internal density map.
+experiment:
+  name: real_lunar_geometry_shootout
+  kind: sweep
+  question_id: Q6
+  question: "On real lunar data, does surface-near / multi-resolution geometry reduce low-altitude error?"
+
+base_config:
+  seed: 42
+  device: cpu
+  dtype: float64
+
+  body:
+    R_body: 1.0
+    normalize_positions: true
+    physical_R_body: 1738.0
+    physical_R_body_units: km
+    position_units: normalized
+    potential_units: km^2/s^2
+    acceleration_units: km/s^2
+
+  data:
+    type: csv
+    path: data/lunar_grail_gl0420a_L60_residual.csv
+    train_fraction: 0.8
+    seed: 42
+
+  model:
+    type: multishell
+    shell_alphas: [0.70, 0.86, 0.95]
+    n_sources_per_shell: [384, 512, 384]
+    weight_mode: surface_area
+
+  kernel:
+    eps: 0.0
+    acceleration_sign: 1.0
+    source_chunk_size: 1024
+
+  solver:
+    type: ridge
+    ridge_method: augmented_lstsq
+    lambda_l2: auto
+    column_normalize: true
+
+  loss:
+    use_potential: true
+    use_acceleration: true
+    normalize_targets: true
+    potential_scale: auto
+    acceleration_scale: auto
+    lambda_potential: 0.2
+    lambda_acceleration: 1.0
+    lambda_l2: auto
+    lambda_moment: 1.0e-4
+    lambda_dipole: 1.0
+    shell_energy_weights: []
+
+  split:
+    type: random
+    radius_units: normalized
+    train_fraction: 0.8
+
+  evaluation:
+    batch_size: 4096
+    n_altitude_bins: 6
+
+  output:
+    save_plots: false
+
+sweep:
+  - name: multi_baseline
+    set: {model.shell_alphas: [0.70, 0.86, 0.95], model.n_sources_per_shell: [384, 512, 384]}
+  - name: deep_only
+    set: {model.shell_alphas: [0.50, 0.70], model.n_sources_per_shell: [512, 512]}
+  - name: surface_dense
+    set: {model.shell_alphas: [0.86, 0.95, 0.98], model.n_sources_per_shell: [384, 512, 640]}
+  - name: multi_resolution
+    set: {model.shell_alphas: [0.50, 0.70, 0.86, 0.95, 0.98], model.n_sources_per_shell: [128, 192, 256, 384, 512]}
+  - name: denser_baseline
+    set: {model.shell_alphas: [0.70, 0.86, 0.95], model.n_sources_per_shell: [640, 768, 640]}

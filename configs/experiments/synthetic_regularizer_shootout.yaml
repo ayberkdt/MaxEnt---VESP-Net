@@ -1,0 +1,110 @@
+# E7 — Regularizer Shootout: L2 vs entropy at MATCHED data error.
+#   python scripts/regularizer_shootout.py --config configs/experiments/synthetic_regularizer_shootout.yaml
+#
+# Collapse-prone multi-shell setup (4 near-redundant shells fitting a single-shell truth ->
+# brittle inter-shell near-cancellation). Two regularizer FAMILIES on identical data/geometry:
+#   - ridge_l2_*  : the L2 (Tikhonov) knob, lambda_l2 from 1e-6 (collapsed) up to 1e-1.
+#   - maxent_f_*  : the entropy knob (constrained MaxEnt), staying at the collapsed lambda_l2=1e-6
+#                   and backing off the data fit via entropy (misfit_factor 1.5..10).
+# The shootout report aligns the two families by data error and asks which buys more source
+# HEALTH (lower cancellation / sigma_l2 / top5, higher effective_source_count) per unit error.
+# Here the disease is a source-NORM pathology, so L2 is expected to dominate.
+experiment:
+  name: synthetic_regularizer_shootout
+  kind: sweep
+  question_id: Q5
+  question: "At matched data error, does entropy buy more source-health than L2 (norm/cancellation disease)?"
+
+base_config:
+  seed: 42
+  dtype: float64
+  device: cpu
+
+  body:
+    R_body: 1.0
+    normalize_positions: true
+
+  data:
+    type: synthetic
+    path:
+    seed: 7
+    synthetic_n_query: 512
+    synthetic_n_truth_sources: 96
+    synthetic_query_radius_min: 1.05
+    synthetic_query_radius_max: 1.60
+    synthetic_truth_shell_radius: 0.72
+    synthetic_noise_std: 0.0
+
+  model:
+    type: multishell
+    shell_alphas: [0.50, 0.70, 0.86, 0.95]
+    n_sources_per_shell: [128, 128, 128, 128]
+    weight_mode: surface_area
+
+  kernel:
+    eps: 0.0
+    acceleration_sign: 1.0
+    source_chunk_size: 512
+
+  solver:
+    type: ridge
+    ridge_method: augmented_lstsq
+    lambda_l2: 1.0e-6
+    column_normalize: true
+
+  loss:
+    use_potential: true
+    use_acceleration: true
+    normalize_targets: false
+    lambda_potential: 0.2
+    lambda_acceleration: 1.0
+    lambda_l2: 1.0e-6
+    lambda_moment: 1.0e-4
+    lambda_dipole: 1.0
+    shell_energy_weights: []
+    entropy_mode: positive_negative
+
+  maxent:
+    optimizer: lbfgs
+    max_iter: 200
+    warm_start: true
+    mode: constrained
+    search_iters: 16
+    weight_bounds: [1.0e-8, 1.0e+3]
+
+  split:
+    type: random
+    train_fraction: 0.8
+
+  evaluation:
+    batch_size: 4096
+    n_altitude_bins: 6
+
+  output:
+    save_plots: false
+
+sweep:
+  # --- L2 knob (ridge) ---
+  - name: ridge_l2_1em6
+    set: {solver.type: ridge, loss.lambda_l2: 1.0e-6, solver.lambda_l2: 1.0e-6}
+  - name: ridge_l2_1em5
+    set: {solver.type: ridge, loss.lambda_l2: 1.0e-5, solver.lambda_l2: 1.0e-5}
+  - name: ridge_l2_1em4
+    set: {solver.type: ridge, loss.lambda_l2: 1.0e-4, solver.lambda_l2: 1.0e-4}
+  - name: ridge_l2_1em3
+    set: {solver.type: ridge, loss.lambda_l2: 1.0e-3, solver.lambda_l2: 1.0e-3}
+  - name: ridge_l2_1em2
+    set: {solver.type: ridge, loss.lambda_l2: 1.0e-2, solver.lambda_l2: 1.0e-2}
+  - name: ridge_l2_1em1
+    set: {solver.type: ridge, loss.lambda_l2: 1.0e-1, solver.lambda_l2: 1.0e-1}
+  # --- entropy knob (constrained MaxEnt, stays at collapsed L2=1e-6) ---
+  - name: maxent_f1p5
+    set: {solver.type: maxent, maxent.misfit_factor: 1.5}
+  - name: maxent_f2
+    set: {solver.type: maxent, maxent.misfit_factor: 2.0}
+  - name: maxent_f3
+    set: {solver.type: maxent, maxent.misfit_factor: 3.0}
+  - name: maxent_f5
+    set: {solver.type: maxent, maxent.misfit_factor: 5.0}
+  - name: maxent_f10
+    set: {solver.type: maxent, maxent.misfit_factor: 10.0}

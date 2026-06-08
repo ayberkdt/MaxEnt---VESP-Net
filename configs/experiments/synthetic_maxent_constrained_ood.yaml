@@ -1,0 +1,114 @@
+# E6 — Constrained MaxEnt vs ridge at EQUAL data fit, judged on OOD generalization.
+#   python scripts/run_experiment_suite.py --experiment E6
+#
+# This is the FAIR test of the MaxEnt idea (the earlier penalty-form sweep judged entropy
+# on training RMSE, which it can only ever hurt). Setup:
+#   - underdetermined multi-shell model [0.50,0.70,0.86,0.95] fitting a single-shell truth
+#     (alpha=0.72) -> many near-degenerate solutions fit the data equally well;
+#   - NOISY observations (noise_std>0): MaxEnt's value proposition needs a noise floor.
+#     With noiseless data the max-entropy-at-equal-fit IS the data-optimal solution (no
+#     freedom). With noise, fitting only to the noise level leaves room for entropy to pick
+#     a better-generalizing representative (the classic chi^2 ~ N / Skilling-Bryan regime).
+#   - a fixed, mildly-regularized L2 so the problem stays genuinely degenerate;
+#   - an altitude OOD split: train/val on the mid band [1.05,1.50], then test on the
+#     held-out LOW band [1.01,1.05] (the real bottleneck) and HIGH band [1.50,2.00].
+#
+# Two trials at the SAME L2 and data split:
+#   ridge_baseline      -> ordinary Tikhonov solution.
+#   maxent_constrained  -> MAXIMIZE entropy subject to data misfit <= 1.05 x ridge misfit
+#                          (auto-selected entropy weight). i.e. among the solutions that fit
+#                          the training band as well as ridge, take the maximum-entropy one.
+#
+# The question: does the maximum-entropy representative generalize BETTER to the OOD
+# low/high bands (test_low_acceleration_rmse / test_high_acceleration_rmse) than ridge,
+# at essentially equal in-sample fit? If yes, MaxEnt earns its place. If no, report honestly.
+experiment:
+  name: synthetic_maxent_constrained_ood
+  kind: sweep
+  question_id: Q5
+  question: "At equal data fit, does maximum-entropy source selection generalize better to OOD altitude than ridge?"
+
+base_config:
+  seed: 42
+  dtype: float64
+  device: cpu
+
+  body:
+    R_body: 1.0
+    normalize_positions: true
+
+  data:
+    type: synthetic
+    path:
+    seed: 7
+    synthetic_n_query: 1024
+    synthetic_n_truth_sources: 96
+    synthetic_query_radius_min: 1.01
+    synthetic_query_radius_max: 2.00
+    synthetic_truth_shell_radius: 0.72
+    synthetic_noise_std: 1.0e-2
+
+  model:
+    type: multishell
+    shell_alphas: [0.50, 0.70, 0.86, 0.95]
+    n_sources_per_shell: [128, 128, 128, 128]
+    weight_mode: surface_area
+
+  kernel:
+    eps: 0.0
+    acceleration_sign: 1.0
+    source_chunk_size: 512
+
+  solver:
+    type: ridge
+    ridge_method: augmented_lstsq
+    lambda_l2: 1.0e-6
+    column_normalize: true
+
+  loss:
+    use_potential: true
+    use_acceleration: true
+    normalize_targets: false
+    lambda_potential: 0.2
+    lambda_acceleration: 1.0
+    lambda_l2: 1.0e-6
+    lambda_moment: 1.0e-4
+    lambda_dipole: 1.0
+    shell_energy_weights: []
+    entropy_mode: positive_negative
+
+  maxent:
+    optimizer: lbfgs
+    max_iter: 300
+    warm_start: true
+    mode: constrained
+    # Allow the in-sample misfit to grow to 1.5x the (mildly-regularized) ridge misfit,
+    # i.e. back off from overfitting the noise, and maximize entropy within that budget.
+    misfit_factor: 1.5
+    search_iters: 20
+    weight_bounds: [1.0e-8, 1.0e+3]
+    verbose: false
+
+  split:
+    type: altitude_ood
+    train_fraction: 0.8
+    train_r_range: [1.05, 1.50]
+    val_r_range: [1.05, 1.50]
+    test_high_r_range: [1.50, 2.00]
+    test_low_r_range: [1.01, 1.05]
+
+  evaluation:
+    batch_size: 4096
+    n_altitude_bins: 6
+
+  output:
+    save_plots: false
+
+sweep:
+  - name: ridge_baseline
+    set:
+      solver.type: ridge
+  - name: maxent_constrained
+    set:
+      solver.type: maxent
+      maxent.mode: constrained

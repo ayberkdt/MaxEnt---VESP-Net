@@ -1,0 +1,83 @@
+# E3 — L2 (Tikhonov) sweep (answers Q4).
+#   python scripts/run_experiment_suite.py --experiment E3
+#
+# A multi-shell model ([0.50, 0.70, 0.86, 0.95]) is fitted to a single-shell synthetic
+# truth (alpha = 0.72), which is deliberately ill-conditioned (over-complete, adjacent
+# near-redundant shells). lambda_l2 is swept over many orders of magnitude.
+#
+# For each run, compare: relative_acceleration_rmse, sigma_l2, shell_cancellation_ratio,
+# dominant_shell_energy_fraction, relative monopole/dipole leakage, low/high altitude
+# error ratio.
+#
+# Expected: very low L2 fits the data but yields unstable source solutions (large
+# sigma_l2 / cancellation); too-high L2 over-smooths and raises RMSE. There should be a
+# Pareto-like stable region in between.
+experiment:
+  name: synthetic_l2_sweep
+  kind: sweep
+  question_id: Q4
+  question: "How much L2 regularization is needed to suppress ill-conditioned source solutions?"
+
+base_config:
+  seed: 42
+  dtype: float64
+  device: cpu
+
+  body:
+    R_body: 1.0
+    normalize_positions: true
+
+  data:
+    type: synthetic
+    path:
+    seed: 7
+    synthetic_n_query: 512
+    synthetic_n_truth_sources: 96
+    synthetic_query_radius_min: 1.05
+    synthetic_query_radius_max: 1.60
+    synthetic_truth_shell_radius: 0.72
+    synthetic_noise_std: 0.0
+
+  model:
+    type: multishell
+    shell_alphas: [0.50, 0.70, 0.86, 0.95]
+    n_sources_per_shell: [128, 128, 128, 128]
+    weight_mode: surface_area
+
+  kernel:
+    eps: 0.0
+    acceleration_sign: 1.0
+    source_chunk_size: 512
+
+  solver:
+    type: ridge
+    ridge_method: augmented_lstsq
+    lambda_l2: 1.0e-6
+    column_normalize: true
+
+  loss:
+    use_potential: true
+    use_acceleration: true
+    normalize_targets: false
+    lambda_potential: 0.2
+    lambda_acceleration: 1.0
+    lambda_l2: 1.0e-6
+    lambda_moment: 1.0e-4
+    lambda_dipole: 1.0
+    shell_energy_weights: []
+
+  split:
+    type: random
+    train_fraction: 0.8
+
+  evaluation:
+    batch_size: 4096
+    n_altitude_bins: 6
+
+  output:
+    save_plots: false
+
+sweep:
+  coupled_grid:
+    - paths: ["loss.lambda_l2", "solver.lambda_l2"]
+      values: [1.0e-10, 1.0e-8, 1.0e-6, 1.0e-4, 1.0e-2, 1.0e-1, 1.0, 3.0, 10.0, 30.0, 100.0]

@@ -1,0 +1,89 @@
+# E0 — Synthetic exact recovery (answers Q1).
+#   python scripts/run_experiment_suite.py --experiment E0
+#
+# Truth sources and the fitted model live on the SAME shell (alpha = 0.72), so the
+# equivalent-source model can represent the exterior field essentially exactly (up to
+# regularization). This is a correctness sanity check for the Newtonian potential
+# kernel, the analytic acceleration kernel, the ridge solver and the metrics. It is
+# NOT a MaxEnt result.
+#
+# Expected: very low potential and acceleration RMSE, no source-collapse warning, and
+# (with moment constraints enabled) no monopole/dipole leakage.
+#
+# Note on acceptability: at machine-precision-level RMSE the low/high altitude band
+# ratio is a ratio of two ~1e-10 numbers and is numerically meaningless, so the
+# low-altitude screening factor is loosened for this experiment only. Read the absolute
+# RMSE, not the screening status, for E0.
+experiment:
+  name: synthetic_exact_recovery
+  kind: single
+  question_id: Q1
+  question: "Can a fixed-source equivalent-source model reproduce a known synthetic exterior residual field?"
+
+base_config:
+  seed: 42
+  dtype: float64
+  device: cpu
+
+  body:
+    R_body: 1.0
+    normalize_positions: true
+
+  data:
+    type: synthetic
+    path:
+    seed: 7
+    synthetic_n_query: 512
+    synthetic_n_truth_sources: 64
+    synthetic_query_radius_min: 1.05
+    synthetic_query_radius_max: 1.60
+    synthetic_truth_shell_radius: 0.72
+    synthetic_noise_std: 0.0
+
+  # Identical geometry to the truth (same shell radius AND same source count -> same
+  # Fibonacci point positions), so the truth field lies exactly in the model's span and
+  # recovery is limited only by regularization/conditioning, not representation error.
+  model:
+    type: discrete
+    shell_alpha: 0.72
+    n_source: 64
+    weight_mode: surface_area
+
+  kernel:
+    eps: 0.0
+    acceleration_sign: 1.0
+    source_chunk_size: 512
+
+  solver:
+    type: ridge
+    ridge_method: augmented_lstsq
+    lambda_l2: 1.0e-8
+    column_normalize: true
+
+  loss:
+    use_potential: true
+    use_acceleration: true
+    normalize_targets: false
+    lambda_potential: 0.2
+    lambda_acceleration: 1.0
+    lambda_l2: 1.0e-8
+    lambda_moment: 1.0e-4
+    lambda_dipole: 1.0
+    shell_energy_weights: []
+
+  split:
+    type: random
+    train_fraction: 0.8
+
+  evaluation:
+    batch_size: 4096
+    n_altitude_bins: 6
+
+  # See header note: the band ratio is meaningless at machine precision, so this
+  # screening factor is intentionally relaxed for the exact-recovery sanity check.
+  acceptance:
+    max_low_altitude_rmse_factor: 1.0e+9
+    max_relative_acceleration_rmse: 1.0e-3
+
+  output:
+    save_plots: false

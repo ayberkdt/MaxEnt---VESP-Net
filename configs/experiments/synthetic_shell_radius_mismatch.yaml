@@ -1,0 +1,82 @@
+# E1 — Shell radius mismatch (answers Q2).
+#   python scripts/run_experiment_suite.py --experiment E1
+#
+# Truth shell is fixed at alpha_truth = 0.72. The model shell radius is swept across
+# 0.50, 0.60, 0.72, 0.86, 0.95. This tests how sensitive the fit is to source-shell
+# placement.
+#
+# Compare across trials: relative_acceleration_rmse, sigma_l2,
+# top_5pct_source_contribution, low_altitude_acceleration_rmse, radial/cross-radial.
+#
+# Expected: the matched / nearby shell (0.72) fits most stably; surface-near shells
+# (0.95) can fit sharply but inflate source strengths (sigma_l2); deep shells (0.50)
+# over-smooth and lose high-frequency residual detail.
+experiment:
+  name: synthetic_shell_radius_mismatch
+  kind: sweep
+  question_id: Q2
+  question: "How sensitive is the fit to source-shell radius mismatch?"
+
+base_config:
+  seed: 42
+  dtype: float64
+  device: cpu
+
+  body:
+    R_body: 1.0
+    normalize_positions: true
+
+  data:
+    type: synthetic
+    path:
+    seed: 7
+    synthetic_n_query: 512
+    synthetic_n_truth_sources: 96
+    synthetic_query_radius_min: 1.05
+    synthetic_query_radius_max: 1.60
+    synthetic_truth_shell_radius: 0.72
+    synthetic_noise_std: 0.0
+
+  model:
+    type: discrete
+    shell_alpha: 0.72
+    n_source: 256
+    weight_mode: surface_area
+
+  kernel:
+    eps: 0.0
+    acceleration_sign: 1.0
+    source_chunk_size: 512
+
+  solver:
+    type: ridge
+    ridge_method: augmented_lstsq
+    lambda_l2: 1.0e-6
+    column_normalize: true
+
+  loss:
+    use_potential: true
+    use_acceleration: true
+    normalize_targets: false
+    lambda_potential: 0.2
+    lambda_acceleration: 1.0
+    lambda_l2: 1.0e-6
+    lambda_moment: 1.0e-4
+    lambda_dipole: 1.0
+    shell_energy_weights: []
+
+  split:
+    type: random
+    train_fraction: 0.8
+
+  evaluation:
+    batch_size: 4096
+    n_altitude_bins: 6
+
+  output:
+    save_plots: false
+
+sweep:
+  coupled_grid:
+    - paths: ["model.shell_alpha"]
+      values: [0.50, 0.60, 0.72, 0.86, 0.95]

@@ -1,0 +1,103 @@
+# E7 (real lunar) — Regularizer Shootout on the GRAIL-derived band-limited residual.
+#   python scripts/regularizer_shootout.py --config configs/experiments/real_lunar_regularizer_shootout.yaml
+#
+# Same L2-vs-entropy-at-matched-error comparison on the real lunar collapse case. Heavier
+# than the synthetic version (each MaxEnt trial runs a bisection of L-BFGS solves over 1280
+# sources), so the MaxEnt grid is deliberately small. NOT part of CI / the basic pre-results
+# check. Target wording: GRAIL-derived band-limited lunar residual; NOT an internal density map.
+experiment:
+  name: real_lunar_regularizer_shootout
+  kind: sweep
+  question_id: Q5
+  question: "On real lunar data, does entropy buy more source-health than L2 at matched error?"
+
+base_config:
+  seed: 42
+  device: cpu
+  dtype: float64
+
+  body:
+    R_body: 1.0
+    normalize_positions: true
+    physical_R_body: 1738.0
+    physical_R_body_units: km
+    position_units: normalized
+    potential_units: km^2/s^2
+    acceleration_units: km/s^2
+
+  data:
+    type: csv
+    path: data/lunar_grail_gl0420a_L60_residual.csv
+    train_fraction: 0.8
+    seed: 42
+
+  model:
+    type: multishell
+    shell_alphas: [0.70, 0.86, 0.95]
+    n_sources_per_shell: [384, 512, 384]
+    weight_mode: surface_area
+
+  kernel:
+    eps: 0.0
+    acceleration_sign: 1.0
+    source_chunk_size: 1024
+
+  solver:
+    type: ridge
+    ridge_method: augmented_lstsq
+    lambda_l2: 1.0e-5
+    column_normalize: true
+
+  loss:
+    use_potential: true
+    use_acceleration: true
+    normalize_targets: true
+    potential_scale: auto
+    acceleration_scale: auto
+    lambda_potential: 0.2
+    lambda_acceleration: 1.0
+    lambda_l2: 1.0e-5
+    lambda_moment: 1.0e-4
+    lambda_dipole: 1.0
+    shell_energy_weights: []
+    entropy_mode: shell_balance
+
+  maxent:
+    optimizer: lbfgs
+    max_iter: 300
+    warm_start: true
+    mode: constrained
+    search_iters: 14
+    weight_bounds: [1.0e-8, 1.0e+3]
+
+  split:
+    type: random
+    radius_units: normalized
+    train_fraction: 0.8
+
+  evaluation:
+    batch_size: 4096
+    n_altitude_bins: 6
+
+  output:
+    save_plots: false
+
+sweep:
+  - name: ridge_l2_1em5
+    set: {solver.type: ridge, loss.lambda_l2: 1.0e-5, solver.lambda_l2: 1.0e-5}
+  - name: ridge_l2_1em3
+    set: {solver.type: ridge, loss.lambda_l2: 1.0e-3, solver.lambda_l2: 1.0e-3}
+  - name: ridge_l2_1em1
+    set: {solver.type: ridge, loss.lambda_l2: 1.0e-1, solver.lambda_l2: 1.0e-1}
+  - name: ridge_l2_1e0
+    set: {solver.type: ridge, loss.lambda_l2: 1.0, solver.lambda_l2: 1.0}
+  - name: ridge_l2_1e1
+    set: {solver.type: ridge, loss.lambda_l2: 10.0, solver.lambda_l2: 10.0}
+  - name: ridge_l2_3e1
+    set: {solver.type: ridge, loss.lambda_l2: 30.0, solver.lambda_l2: 30.0}
+  - name: maxent_f1p5
+    set: {solver.type: maxent, maxent.misfit_factor: 1.5}
+  - name: maxent_f3
+    set: {solver.type: maxent, maxent.misfit_factor: 3.0}
+  - name: maxent_f10
+    set: {solver.type: maxent, maxent.misfit_factor: 10.0}

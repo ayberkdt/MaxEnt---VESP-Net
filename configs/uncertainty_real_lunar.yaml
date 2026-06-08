@@ -1,0 +1,76 @@
+# Stage 3C+ — Heteroscedastic (altitude-dependent) posterior calibration on real lunar.
+#   python -m vesp.training.uncertainty --config configs/uncertainty_real_lunar.yaml
+#
+# GRAIL-derived band-limited residual, RANDOM split (all altitudes appear in training), so the
+# altitude-dependent model misfit can be learned and the per-altitude-band calibration is
+# in-distribution (the clean heteroscedastic demo). The posterior mean is still ridge; the
+# heteroscedastic noise sigma^2(h)=a*h^(-b) (h = r - 1) widens the predictive intervals toward
+# the surface so per-band PICP approaches nominal. Evidence selects the global noise/prior scale.
+seed: 42
+device: cpu
+dtype: float64
+
+body:
+  R_body: 1.0
+  normalize_positions: true
+  physical_R_body: 1738.0
+  physical_R_body_units: km
+  position_units: normalized
+  potential_units: km^2/s^2
+  acceleration_units: km/s^2
+
+data:
+  type: csv
+  path: data/lunar_grail_gl0420a_L60_residual.csv
+  train_fraction: 0.8
+  seed: 42
+
+model:
+  type: multishell
+  shell_alphas: [0.70, 0.86, 0.95]
+  n_sources_per_shell: [384, 512, 384]
+  weight_mode: surface_area
+
+kernel:
+  eps: 0.0
+  acceleration_sign: 1.0
+  source_chunk_size: 1024
+
+solver:
+  type: ridge
+  ridge_method: augmented_lstsq
+  lambda_l2: 30.0
+  column_normalize: true
+
+loss:
+  use_potential: false
+  use_acceleration: true
+  normalize_targets: false
+  lambda_potential: 0.0
+  lambda_acceleration: 1.0
+  lambda_l2: 30.0
+  lambda_moment: 0.0
+  lambda_dipole: 1.0
+  shell_energy_weights: []
+
+split:
+  type: random
+  radius_units: normalized
+  train_fraction: 0.8
+
+evaluation:
+  batch_size: 4096
+  n_altitude_bins: 6
+  altitude_bands:
+    low: [1.03, 1.15]
+    mid: [1.15, 1.35]
+    high: [1.35, 1.60]
+
+uncertainty:
+  hyperparams: evidence
+  noise_model: heteroscedastic
+
+output:
+  output_dir: outputs
+  run_name: uncertainty_real_lunar
+  save_plots: false

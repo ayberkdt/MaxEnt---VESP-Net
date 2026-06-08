@@ -1,0 +1,85 @@
+# E5 (part 2) — Real lunar L2 sweep (contributes to Q4/Q6).
+#   python scripts/run_experiment_suite.py --config configs/experiments/real_lunar_l2_sweep.yaml
+#
+# Sweeps Tikhonov lambda_l2 over many orders of magnitude on the GRAIL-derived
+# band-limited lunar residual field with the conservative multi-shell geometry. This is
+# the real-data analogue of E3 and the quantitative basis for the default lambda_l2 = 30:
+# the brittle inter-shell near-cancellation (shell_cancellation_ratio ~140 at 1e-5) lives
+# in the operator's near-null space, so it is removed at near-zero data cost by proper L2.
+#
+# For each run compare: relative_acceleration_rmse, sigma_l2, shell_cancellation_ratio,
+# dominant_shell_energy_fraction, relative monopole/dipole leakage, low/high altitude error.
+#
+# WORDING: GRAIL-derived band-limited lunar residual target — not an internal density map.
+experiment:
+  name: real_lunar_l2_sweep
+  kind: sweep
+  question_id: Q4
+  question: "How much L2 regularization is needed to suppress ill-conditioned source solutions (real lunar)?"
+
+base_config:
+  seed: 42
+  device: cpu
+  dtype: float64
+
+  body:
+    R_body: 1.0
+    normalize_positions: true
+    physical_R_body: 1738.0
+    physical_R_body_units: km
+    position_units: normalized
+    potential_units: km^2/s^2
+    acceleration_units: km/s^2
+
+  data:
+    type: csv
+    path: data/lunar_grail_gl0420a_L60_residual.csv
+    train_fraction: 0.8
+    seed: 42
+
+  model:
+    type: multishell
+    shell_alphas: [0.70, 0.86, 0.95]
+    n_sources_per_shell: [384, 512, 384]
+    weight_mode: surface_area
+
+  kernel:
+    eps: 0.0
+    acceleration_sign: 1.0
+    source_chunk_size: 1024
+
+  solver:
+    type: ridge
+    ridge_method: augmented_lstsq
+    lambda_l2: 30.0
+    column_normalize: true
+
+  loss:
+    use_potential: true
+    use_acceleration: true
+    normalize_targets: true
+    potential_scale: auto
+    acceleration_scale: auto
+    lambda_potential: 0.2
+    lambda_acceleration: 1.0
+    lambda_l2: 30.0
+    lambda_moment: 1.0e-4
+    lambda_dipole: 1.0
+    shell_energy_weights: []
+
+  split:
+    type: random
+    radius_units: normalized
+    train_fraction: 0.8
+
+  evaluation:
+    batch_size: 4096
+    n_altitude_bins: 6
+
+  output:
+    save_plots: false
+
+sweep:
+  coupled_grid:
+    - paths: ["loss.lambda_l2", "solver.lambda_l2"]
+      values: [1.0e-5, 1.0e-3, 1.0e-1, 1.0, 10.0, 30.0, 100.0, 1000.0]

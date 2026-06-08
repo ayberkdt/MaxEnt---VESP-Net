@@ -1,0 +1,83 @@
+# E5 (part 1) — Real lunar ridge baseline (contributes to Q6).
+#   python scripts/run_experiment_suite.py --config configs/experiments/real_lunar_ridge_baseline.yaml
+#
+# Conservative multi-shell ridge/Tikhonov fit of the GRAIL-derived band-limited lunar
+# residual field (degrees 2-60). This is the classical baseline that every MaxEnt run
+# must be compared against.
+#
+# IMPORTANT WORDING: the target is the "GRAIL-derived band-limited lunar residual field"
+# / "spherical-harmonic-derived lunar residual target". This experiment does NOT recover
+# the Moon's true internal density; it fits an equivalent mathematical source map that
+# reproduces the exterior residual. It is a proof-of-concept, not an operational lunar
+# gravity model.
+#
+# L2 NOTE: conservative L2 baseline (lambda_l2 = 30). This is the de-collapsed setting:
+# proper Tikhonov removes the brittle inter-shell near-cancellation at near-zero data cost
+# (see configs/ablation_real_lunar_regularization.yaml).
+experiment:
+  name: real_lunar_ridge_baseline
+  kind: single
+  question_id: Q6
+  question: "On lunar band-limited residual data, is the method numerically stable across altitude bands?"
+
+base_config:
+  seed: 42
+  device: cpu
+  dtype: float64
+
+  body:
+    R_body: 1.0
+    normalize_positions: true
+    physical_R_body: 1738.0
+    physical_R_body_units: km
+    position_units: normalized
+    potential_units: km^2/s^2
+    acceleration_units: km/s^2
+
+  data:
+    type: csv
+    path: data/lunar_grail_gl0420a_L60_residual.csv
+    train_fraction: 0.8
+    seed: 42
+
+  model:
+    type: multishell
+    shell_alphas: [0.70, 0.86, 0.95]
+    n_sources_per_shell: [384, 512, 384]
+    weight_mode: surface_area
+
+  kernel:
+    eps: 0.0
+    acceleration_sign: 1.0
+    source_chunk_size: 1024
+
+  solver:
+    type: ridge
+    ridge_method: augmented_lstsq
+    lambda_l2: 30.0
+    column_normalize: true
+
+  loss:
+    use_potential: true
+    use_acceleration: true
+    normalize_targets: true
+    potential_scale: auto
+    acceleration_scale: auto
+    lambda_potential: 0.2
+    lambda_acceleration: 1.0
+    lambda_l2: 30.0
+    lambda_moment: 1.0e-4
+    lambda_dipole: 1.0
+    shell_energy_weights: []
+
+  split:
+    type: random
+    radius_units: normalized
+    train_fraction: 0.8
+
+  evaluation:
+    batch_size: 4096
+    n_altitude_bins: 6
+
+  output:
+    save_plots: false

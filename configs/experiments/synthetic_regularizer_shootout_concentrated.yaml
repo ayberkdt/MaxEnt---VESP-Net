@@ -1,0 +1,106 @@
+# E7 (variant) — Regularizer Shootout on a CONCENTRATED setup (entropy's fairest shot).
+#   python scripts/regularizer_shootout.py --config configs/experiments/synthetic_regularizer_shootout_concentrated.yaml
+#
+# Entropy's natural niche is DE-CONCENTRATION (spreading mass), which L2 (a norm penalty)
+# does not control directly. To give entropy its best chance, this uses a localized anomaly
+# (few truth sources) and near-field queries, where the equivalent-source fit is more prone
+# to concentrate source mass on a few near-surface sources. If entropy ever earns a niche,
+# it is here (lower top_5pct_source_contribution / higher effective_source_count at matched
+# error). Same shootout machinery and verdict; honest either way.
+experiment:
+  name: synthetic_regularizer_shootout_concentrated
+  kind: sweep
+  question_id: Q5
+  question: "On a concentrated/localized setup, does entropy buy de-concentration health that L2 cannot?"
+
+base_config:
+  seed: 42
+  dtype: float64
+  device: cpu
+
+  body:
+    R_body: 1.0
+    normalize_positions: true
+
+  data:
+    type: synthetic
+    path:
+    seed: 7
+    synthetic_n_query: 512
+    synthetic_n_truth_sources: 6
+    synthetic_query_radius_min: 1.03
+    synthetic_query_radius_max: 1.30
+    synthetic_truth_shell_radius: 0.86
+    synthetic_noise_std: 0.0
+
+  model:
+    type: multishell
+    shell_alphas: [0.50, 0.70, 0.86, 0.95]
+    n_sources_per_shell: [128, 128, 128, 128]
+    weight_mode: surface_area
+
+  kernel:
+    eps: 0.0
+    acceleration_sign: 1.0
+    source_chunk_size: 512
+
+  solver:
+    type: ridge
+    ridge_method: augmented_lstsq
+    lambda_l2: 1.0e-6
+    column_normalize: true
+
+  loss:
+    use_potential: true
+    use_acceleration: true
+    normalize_targets: false
+    lambda_potential: 0.2
+    lambda_acceleration: 1.0
+    lambda_l2: 1.0e-6
+    lambda_moment: 1.0e-4
+    lambda_dipole: 1.0
+    shell_energy_weights: []
+    entropy_mode: positive_negative
+
+  maxent:
+    optimizer: lbfgs
+    max_iter: 200
+    warm_start: true
+    mode: constrained
+    search_iters: 16
+    weight_bounds: [1.0e-8, 1.0e+3]
+
+  split:
+    type: random
+    train_fraction: 0.8
+
+  evaluation:
+    batch_size: 4096
+    n_altitude_bins: 6
+
+  output:
+    save_plots: false
+
+sweep:
+  - name: ridge_l2_1em6
+    set: {solver.type: ridge, loss.lambda_l2: 1.0e-6, solver.lambda_l2: 1.0e-6}
+  - name: ridge_l2_1em5
+    set: {solver.type: ridge, loss.lambda_l2: 1.0e-5, solver.lambda_l2: 1.0e-5}
+  - name: ridge_l2_1em4
+    set: {solver.type: ridge, loss.lambda_l2: 1.0e-4, solver.lambda_l2: 1.0e-4}
+  - name: ridge_l2_1em3
+    set: {solver.type: ridge, loss.lambda_l2: 1.0e-3, solver.lambda_l2: 1.0e-3}
+  - name: ridge_l2_1em2
+    set: {solver.type: ridge, loss.lambda_l2: 1.0e-2, solver.lambda_l2: 1.0e-2}
+  - name: ridge_l2_1em1
+    set: {solver.type: ridge, loss.lambda_l2: 1.0e-1, solver.lambda_l2: 1.0e-1}
+  - name: maxent_f1p5
+    set: {solver.type: maxent, maxent.misfit_factor: 1.5}
+  - name: maxent_f2
+    set: {solver.type: maxent, maxent.misfit_factor: 2.0}
+  - name: maxent_f3
+    set: {solver.type: maxent, maxent.misfit_factor: 3.0}
+  - name: maxent_f5
+    set: {solver.type: maxent, maxent.misfit_factor: 5.0}
+  - name: maxent_f10
+    set: {solver.type: maxent, maxent.misfit_factor: 10.0}
