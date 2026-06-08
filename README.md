@@ -45,6 +45,35 @@ uncertainty; irregular-body source placement.
 The binding policy on what may and may not be claimed is
 [`docs/SCIENTIFIC_CLAIMS.md`](docs/SCIENTIFIC_CLAIMS.md).
 
+## VESP-UQ: equivalent-source uncertainty calibration layer
+
+The deterministic entropy/point-estimate experiments showed that maximizing entropy over the
+sources does **not** beat well-regularized ridge on accuracy. The defensible value of the
+equivalent-source machinery is therefore reframed as an **uncertainty and risk-calibration
+layer** (`vesp.uq`), not a better surrogate. VESP-UQ is surrogate-agnostic: given samples of
+any residual-gravity model's error `e_a(x) = a_reference(x) - a_surrogate(x)`, it fits the
+exact linear-Gaussian equivalent-source posterior, calibrates altitude-dependent predictive
+uncertainty, and scores Monte Carlo trajectories so only the riskiest subset needs a
+high-fidelity rerun.
+
+```python
+from vesp.uq import VESPUQPlugin
+plugin = VESPUQPlugin.from_config(config)
+plugin.fit(positions, surrogate_acc, reference_acc)   # e_a = reference - surrogate
+pred  = plugin.predict_uncertainty(query_positions)   # mean error, std, per-point risk
+score = plugin.score_trajectory(orbit_positions)      # aggregate risk along a trajectory
+```
+
+Run the two minimal IAC experiments (standalone calibration + trajectory risk screening) on
+the real lunar residual:
+
+```text
+python -m vesp.uq.run --config configs/vespuq_real_lunar.yaml
+```
+
+The posterior **mean equals the ridge point estimate** (accuracy is unchanged); the
+contribution is calibrated, altitude-aware error bars and the trajectory screen they enable.
+
 ## Experimental Questions
 
 The point of the framework is to make the MaxEnt-VESP idea **falsifiable**. Each

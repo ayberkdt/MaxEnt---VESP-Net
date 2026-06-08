@@ -95,6 +95,70 @@ def select_lambda_l2(
     return points[best_idx]["lambda_l2"], points
 
 
+def lcurve_lambda(
+    operator: torch.Tensor,
+    target: torch.Tensor,
+    *,
+    grid: list[float] | None = None,
+) -> tuple[float, list[dict]]:
+    """Operator-only L-curve corner selection of the Tikhonov weight ``lambda_l2``.
+
+    Unlike :func:`select_lambda_l2`, this needs only ``(A, b)`` -- no source geometry or
+    :class:`RidgeSolveConfig` -- so it is the natural entry point for the surrogate-agnostic
+    VESP-UQ plugin. It uses one economy SVD of ``A`` and evaluates each grid ``lambda`` in
+    closed form (no repeated solves, no ill-conditioning): for ``A = U S V^T`` and
+    ``beta = U^T b`` the Tikhonov filter factors are ``f_i = s_i^2 / (s_i^2 + lambda)``, the
+    solution norm is ``||sigma||^2 = sum (f_i beta_i / s_i)^2`` and the residual norm is
+    ``||A sigma - b||^2 = sum (lambda/(s_i^2 + lambda))^2 beta_i^2 + (||b||^2 - ||beta||^2)``.
+    Returns ``(lambda_star, curve_points)`` at maximum Menger curvature of the log-log curve.
+    """
+
+    grid = sorted(float(g) for g in (grid or DEFAULT_LAMBDA_GRID))
+    eps = torch.finfo(operator.dtype).tiny
+    # economy SVD; singular values descending. Drop numerically-zero modes.
+    svd = torch.linalg.svd(operator, full_matrices=False)
+    s = svd.S
+    beta = svd.U.transpose(-1, -2) @ target  # (k,)
+    s2 = s * s
+    beta2 = beta * beta
+    b_norm2 = float(torch.sum(target * target).detach().cpu())
+    captured = float(torch.sum(beta2).detach().cpu())
+    residual_floor = max(b_norm2 - captured, 0.0)  # energy of b outside the column space
+
+    points: list[dict] = []
+    for lam in grid:
+        denom = s2 + lam
+        f = s2 / denom
+        sol_norm2 = float(torch.sum((f * beta / s.clamp_min(eps)) ** 2).detach().cpu())
+        res_modes = float(torch.sum(((lam / denom) ** 2) * beta2).detach().cpu())
+        residual_norm = math.sqrt(max(res_modes + residual_floor, 0.0))
+        solution_norm = math.sqrt(max(sol_norm2, 0.0))
+        points.append(
+            {
+                "lambda_l2": lam,
+                "residual_norm": residual_norm,
+                "solution_norm": solution_norm,
+                "log_residual": math.log(max(residual_norm, eps)),
+                "log_solution": math.log(max(solution_norm, eps)),
+                "curvature": 0.0,
+            }
+        )
+
+    best_idx = len(points) // 2
+    best_curv = -1.0
+    for i in range(1, len(points) - 1):
+        curv = _menger_curvature(
+            (points[i - 1]["log_residual"], points[i - 1]["log_solution"]),
+            (points[i]["log_residual"], points[i]["log_solution"]),
+            (points[i + 1]["log_residual"], points[i + 1]["log_solution"]),
+        )
+        points[i]["curvature"] = curv
+        if curv > best_curv:
+            best_curv = curv
+            best_idx = i
+    return points[best_idx]["lambda_l2"], points
+
+
 def lambda_is_auto(config: dict) -> bool:
     """True if ``loss.lambda_l2`` (or ``solver.lambda_l2``) is the sentinel string ``auto``."""
 

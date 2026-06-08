@@ -1,0 +1,63 @@
+# VESP-UQ -- Equivalent-source uncertainty calibration layer on the real lunar residual.
+#   python -m vesp.uq.run --config configs/vespuq_real_lunar.yaml
+#
+# Runs Experiment 1 (standalone residual-error calibration) and Experiment 3 (trajectory risk
+# screening) on the GRAIL gl0420a degree-2..60 residual. That residual IS the error of a
+# degree-60 truncation surrogate, so the layer is fit on e_a = a_reference - a_surrogate with
+# the surrogate being the truncated model (surrogate = 0 in residual space).
+seed: 42
+device: cpu
+dtype: float64
+
+body:
+  R_body: 1.0
+  normalize_positions: true
+  physical_R_body: 1738.0
+  physical_R_body_units: km
+  position_units: normalized
+  potential_units: km^2/s^2
+  acceleration_units: km/s^2
+
+data:
+  type: csv
+  path: data/lunar_grail_gl0420a_L60_residual.csv
+  train_fraction: 0.7
+
+model:
+  type: multishell
+  shell_alphas: [0.70, 0.86, 0.95]
+  n_sources_per_shell: [384, 512, 384]
+  weight_mode: surface_area
+
+kernel:
+  eps: 0.0
+  acceleration_sign: 1.0
+  source_chunk_size: 1024
+
+evaluation:
+  altitude_bands:
+    low: [1.03, 1.15]
+    mid: [1.15, 1.35]
+    high: [1.35, 1.60]
+
+uq:
+  # equivalent-source regularization: L-curve corner (automatic), evidence, or fixed
+  regularization:
+    method: lcurve
+    lambda_l2: 30.0          # used only by method: fixed (and as a seed otherwise)
+  noise_model: heteroscedastic
+  val_fraction: 0.25
+  risk:
+    scoring: max             # max | mean | low_alt_integral | time_above | combined
+    low_altitude_radius: 1.15
+  screening:
+    n_orbits: 300
+    n_points: 60
+    r_peri_range: [1.03, 1.40]
+    r_apo_range: [1.40, 1.60]
+    rerun_fraction: 0.20
+
+output:
+  output_dir: outputs
+  run_name: vespuq_real_lunar
+  save_plots: false
