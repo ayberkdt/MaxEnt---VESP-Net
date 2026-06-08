@@ -11,6 +11,10 @@ from vesp.uq.trajectory import (
     RiskScreeningReport,
     aggregate_trajectory_error,
     calibrate_risk_threshold,
+    canonical_scoring_name,
+    is_absolute_scoring,
+    is_expected_only_scoring,
+    is_relative_scoring,
     score_sigma_profile,
     select_reruns,
 )
@@ -404,3 +408,44 @@ def test_calibrated_threshold_yields_zero_alarms_on_lower_risk_set():
     test_set = torch.full((50,), 5.0)  # entirely below the calibrated budget
     report = select_reruns(test_set, threshold=thr)
     assert report.n_flagged == 0
+
+
+# ============================ Phase 3: scale-mismatch hardening ============================
+
+# ---- scoring-mode classification helpers ----
+
+def test_canonical_scoring_name_resolves_aliases():
+    assert canonical_scoring_name("expected") == "expected_abs"
+    assert canonical_scoring_name("expected_p95") == "expected_abs_p95"
+    assert canonical_scoring_name("supervisor") == "supervisor_rel"
+    assert canonical_scoring_name("supervisor_p95") == "supervisor_rel_p95"
+    # canonical names and non-aliased modes map to themselves
+    for name in ("expected_abs", "supervisor_rel", "supervisor_abs", "supervisor_abs_p95", "max"):
+        assert canonical_scoring_name(name) == name
+
+
+def test_relative_vs_absolute_classification():
+    for name in ("supervisor", "supervisor_rel", "supervisor_p95", "supervisor_rel_p95"):
+        assert is_relative_scoring(name) is True
+        assert is_absolute_scoring(name) is False
+    for name in ("expected", "expected_abs", "expected_p95", "expected_abs_p95",
+                 "expected_low_alt", "supervisor_abs", "supervisor_abs_p95"):
+        assert is_absolute_scoring(name) is True
+        assert is_relative_scoring(name) is False
+    # legacy sigma modes are neither relative nor absolute (own family)
+    for name in ("max", "mean", "combined"):
+        assert is_relative_scoring(name) is False
+        assert is_absolute_scoring(name) is False
+
+
+def test_expected_only_classification():
+    for name in ("expected", "expected_abs", "expected_p95", "expected_abs_p95", "expected_low_alt"):
+        assert is_expected_only_scoring(name) is True
+    for name in ("supervisor_rel", "supervisor_abs", "max"):
+        assert is_expected_only_scoring(name) is False
+
+
+def test_scoring_classifiers_reject_unknown_mode():
+    for fn in (canonical_scoring_name, is_relative_scoring, is_absolute_scoring, is_expected_only_scoring):
+        with pytest.raises(ValueError):
+            fn("not_a_mode")

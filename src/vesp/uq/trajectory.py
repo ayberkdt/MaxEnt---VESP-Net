@@ -59,6 +59,70 @@ TRUE_ERROR_AGGREGATORS = ("max", "mean", "p95")
 # Fraction-mode selection policies for select_reruns.
 FRACTION_POLICIES = ("topk", "quantile")
 
+# ---- scoring-mode classification (relative ranking vs absolute physical-budget scale) ----
+# RELATIVE modes normalize altitude per trajectory (good for ranking one ensemble, NOT for
+# cross-trajectory absolute thresholds). ABSOLUTE / absolute-like modes are on a fixed
+# expected-force-error scale, so a single physical budget means the same for every trajectory.
+_RELATIVE_SCORINGS = frozenset(
+    {"supervisor", "supervisor_rel", "supervisor_p95", "supervisor_rel_p95"}
+)
+_ABSOLUTE_SCORINGS = frozenset(
+    {
+        "expected",
+        "expected_abs",
+        "expected_p95",
+        "expected_abs_p95",
+        "expected_low_alt",
+        "supervisor_abs",
+        "supervisor_abs_p95",
+    }
+)
+_EXPECTED_ONLY_SCORINGS = frozenset(_EXPECTED_ONLY_MODES)
+# Canonical names for the backward-compatible aliases.
+_CANONICAL_ALIASES = {
+    "expected": "expected_abs",
+    "expected_p95": "expected_abs_p95",
+    "supervisor": "supervisor_rel",
+    "supervisor_p95": "supervisor_rel_p95",
+}
+
+
+def _validate_scoring(scoring: str) -> str:
+    """Return ``scoring`` if it is a known mode, else raise a clear ``ValueError``."""
+
+    if scoring not in SCORING_FUNCTIONS:
+        raise ValueError(f"unknown scoring {scoring!r}; must be one of {SCORING_FUNCTIONS}")
+    return scoring
+
+
+def canonical_scoring_name(scoring: str) -> str:
+    """Map a (possibly aliased) scoring name to its canonical name.
+
+    ``expected -> expected_abs``, ``expected_p95 -> expected_abs_p95``,
+    ``supervisor -> supervisor_rel``, ``supervisor_p95 -> supervisor_rel_p95``; all other known
+    names map to themselves. Unknown names raise ``ValueError``.
+    """
+
+    return _CANONICAL_ALIASES.get(_validate_scoring(scoring), scoring)
+
+
+def is_relative_scoring(scoring: str) -> bool:
+    """True for per-trajectory-normalized supervisor modes (ranking only, not absolute budgets)."""
+
+    return _validate_scoring(scoring) in _RELATIVE_SCORINGS
+
+
+def is_absolute_scoring(scoring: str) -> bool:
+    """True for absolute / absolute-like expected-force-error modes (safe for physical budgets)."""
+
+    return _validate_scoring(scoring) in _ABSOLUTE_SCORINGS
+
+
+def is_expected_only_scoring(scoring: str) -> bool:
+    """True for the pure expected-error modes (no altitude weighting at all)."""
+
+    return _validate_scoring(scoring) in _EXPECTED_ONLY_SCORINGS
+
 
 @dataclass
 class TrajectoryScore:

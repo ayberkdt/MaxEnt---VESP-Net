@@ -426,13 +426,19 @@ class VESPUQPlugin:
             "n_sources": int(self.sources.n_sources),
             "domain_support_enabled": self.domain_support,
             "domain_k": self.domain_k,
-            "domain_weight": self.domain_weight,
+            "domain_weight": float(self.domain_weight),
+            "domain_distance_weight": float(self.domain_distance_weight),
+            "domain_radial_weight": float(self.domain_radial_weight),
+            "domain_angular_weight": float(self.domain_angular_weight),
+            "domain_support_components": ["distance_score", "radius_penalty", "angular_score", "total_score"],
             "train_radius_min": float(self.train_radii.min()),
             "train_radius_max": float(self.train_radii.max()),
         }
         if self.domain_support:
             # the nearest-neighbour scale is otherwise lazy; materialize it for the report
-            self.fit_info["domain_scale"] = self._domain_nn_scale(self.domain_k)
+            self.fit_info["domain_scale"] = float(self._domain_nn_scale(self.domain_k))
+            if self.domain_angular_weight > 0.0:
+                self.fit_info["domain_angular_scale"] = float(self._domain_angular_nn_scale(self.domain_k))
         if self.altitude_noise is not None:
             self.fit_info["altitude_noise_a"] = self.altitude_noise.a
             self.fit_info["altitude_noise_b"] = self.altitude_noise.b
@@ -739,6 +745,42 @@ class VESPUQPlugin:
         ]
 
     # ------------------------------------------------------------------ threshold calibration
+    def calibrate_pointwise_expected_error_threshold(
+        self, positions, *, quantile: float = 0.95, multiplier: float = 1.0
+    ) -> float:
+        """Absolute pointwise force-error budget: ``quantile`` of held-out ``expected_error``.
+
+        The result is on the **absolute expected-force-error scale**, so it is only meaningful
+        as a ``select_reruns(threshold=...)`` budget for absolute-scale trajectory scores
+        (``expected_abs*`` / ``supervisor_abs*``). Do NOT compare it against a relative
+        (``supervisor_rel*``) trajectory score -- the scales differ.
+        """
+
+        self._require_fitted()
+        values = self.predict_uncertainty(positions).expected_error
+        return _calibrate_risk_threshold(values, quantile=quantile, multiplier=multiplier)
+
+    def calibrate_trajectory_risk_threshold(
+        self,
+        trajectories,
+        *,
+        scoring: str,
+        quantile: float = 0.95,
+        multiplier: float = 1.0,
+        weights=None,
+    ) -> float:
+        """Trajectory-level risk budget: ``quantile`` of ``scoring`` over calibration orbits.
+
+        Because it scores the calibration trajectories with the **same** ``scoring`` that will be
+        screened, the budget is on the screened score's own scale -- so this is safe for BOTH
+        relative and absolute scoring modes (unlike the pointwise budget).
+        """
+
+        self._require_fitted()
+        scores = self.score_ensemble(trajectories, scoring=scoring, weights=weights)
+        values = torch.tensor([s.risk_score for s in scores], dtype=torch.float64)
+        return _calibrate_risk_threshold(values, quantile=quantile, multiplier=multiplier)
+
     def calibrate_risk_threshold(
         self,
         positions=None,
@@ -748,29 +790,22 @@ class VESPUQPlugin:
         multiplier: float = 1.0,
         trajectories=None,
     ) -> float:
-        """Derive an absolute risk threshold from held-out calibration data.
+        """Backward-compatible wrapper around the two explicit calibration methods.
 
-        Two calibration sources (provide one):
-
-        - ``positions`` (a held-out point cloud): the threshold is the ``quantile`` of the
-          per-point ``expected_error`` -- an absolute force-error budget for the ``expected_abs``
-          / ``supervisor_abs`` thresholding path.
-        - ``trajectories`` (held-out calibration orbits): they are scored with ``scoring`` and the
-          threshold is the ``quantile`` of the resulting per-trajectory risk.
-
-        Pair the result with ``select_reruns(threshold=...)`` so a lower-risk test set can
-        legitimately raise zero alarms.
+        Prefer :meth:`calibrate_pointwise_expected_error_threshold` (held-out positions) or
+        :meth:`calibrate_trajectory_risk_threshold` (calibration trajectories) directly -- they
+        make the threshold *scale* (pointwise expected-error vs trajectory score) explicit.
         """
 
-        self._require_fitted()
         if (positions is None) == (trajectories is None):
             raise ValueError("provide exactly one of positions or trajectories")
         if trajectories is not None:
-            scores = self.score_ensemble(trajectories, scoring=scoring)
-            values = torch.tensor([s.risk_score for s in scores], dtype=torch.float64)
-        else:
-            values = self.predict_uncertainty(positions).expected_error
-        return _calibrate_risk_threshold(values, quantile=quantile, multiplier=multiplier)
+            return self.calibrate_trajectory_risk_threshold(
+                trajectories, scoring=scoring, quantile=quantile, multiplier=multiplier
+            )
+        return self.calibrate_pointwise_expected_error_threshold(
+            positions, quantile=quantile, multiplier=multiplier
+        )
 
     # ------------------------------------------------------------------ calibration report
     def evaluate_calibration(self, positions, error, *, altitude_bands: dict | None = None) -> dict:

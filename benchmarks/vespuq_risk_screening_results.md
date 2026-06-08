@@ -101,10 +101,13 @@ ranking* statement, not a verdict on the force-risk/OOD calibration shown in Ben
 
 ## Benchmark 4 — Absolute-Threshold Sweep  *(tests: false-alarm behavior)*
 
-**Setup:** the 512 orbits scored with the cross-trajectory-comparable absolute mode
-(`expected_abs_p95`, normalized acceleration units), then screened with absolute budgets. Unlike
-a fixed top-fraction, an absolute threshold flags *only* orbits exceeding the budget — possibly
-zero.
+**Setup:** the 512 orbits scored with the cross-trajectory-comparable **absolute force-risk
+budget** mode (`expected_abs_p95`, normalized acceleration units), then screened with absolute
+budgets. Unlike a fixed top-fraction, an absolute threshold flags *only* orbits exceeding the
+budget — possibly zero. Pointwise calibration thresholds (a quantile of held-out per-point
+`expected_error`) should be used **only** with absolute-scale scores like this one; relative
+supervisor scores (`supervisor_rel*`) require trajectory-level calibration instead, because their
+per-trajectory altitude normalization puts them on a different scale.
 
 ```text
 --- (b) ABSOLUTE PHYSICAL-BUDGET (scoring=expected_abs_p95) ---

@@ -43,11 +43,13 @@ uq:
   covariance_mode: exact
   val_fraction: 0.3
   risk:
+    # Use supervisor_rel for relative rerun prioritization.
+    # Use expected_abs_p95 or supervisor_abs_p95 for absolute budget / zero-alarm screening.
     # Legacy sigma-only:  max | mean | low_alt_integral | time_above | combined
-    # Expected-error:     expected(_abs) | expected(_abs)_p95 | expected_low_alt
-    # Supervisor (rank):  supervisor / supervisor_rel (+ _p95)   -> per-trajectory altitude norm
-    # Supervisor (budget):supervisor_abs (+ _p95)                -> fixed altitude reference
-    scoring: supervisor
+    # Expected-error:     expected(_abs) | expected(_abs)_p95 | expected_low_alt   (absolute scale)
+    # Supervisor (rank):  supervisor_rel (+ _p95)   -> per-trajectory altitude norm  (relative)
+    # Supervisor (budget):supervisor_abs (+ _p95)   -> fixed altitude reference      (absolute)
+    scoring: supervisor_rel
     low_altitude_radius: 1.15
     # altitude_reference_h: 0.15  # fixed reference altitude for the *_abs modes (default: low-1)
     domain_support: true          # k-NN + radius (+ optional angular) out-of-support penalty
@@ -66,8 +68,20 @@ uq:
     true_error_aggregator: p95   # max | mean | p95  (decoupled from the risk scoring mode)
     time_weighting: none         # none | kepler_r2  (kepler_r2 ~ weight points by dt ~ r^2)
     oracle_source: heldout
-    # threshold: 0.05            # absolute risk threshold; lets a safe regime flag zero orbits
-    # threshold_quantile: 0.95   # OR derive the threshold from held-out expected_error quantile
+    # --- Absolute-threshold screening (omit all of these for fraction mode) ---
+    # threshold_source: manual | pointwise_calibration_quantile | trajectory_calibration_quantile
+    #
+    # threshold_source: manual
+    # threshold: 0.05            # absolute force-risk budget; lets a safe regime flag zero orbits
+    #
+    # threshold_source: pointwise_calibration_quantile
+    # threshold_quantile: 0.99   # quantile of held-out pointwise expected_error
+    #   # scoring MUST be expected_abs* or supervisor_abs* for pointwise thresholds
+    #
+    # threshold_source: trajectory_calibration_quantile
+    # threshold_quantile: 0.95   # works with relative OR absolute scoring -- it calibrates
+    #   # the same trajectory-level risk on a held-out calibration ensemble
+    # threshold_multiplier: 1.0  # scales the calibrated budget
     # max_rerun_fraction: 0.25   # cap the count when an absolute threshold is supplied
 
 output:

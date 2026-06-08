@@ -37,7 +37,13 @@ from vesp.data.dataset import load_csv_dataset
 from vesp.uq.data import UQSamples, load_uq_samples_from_csv, make_synthetic_uq_samples, split_uq_samples
 from vesp.uq.ensemble import generate_orbit_ensemble, nearest_neighbor_error_magnitude
 from vesp.uq.plugin import VESPUQPlugin
-from vesp.uq.trajectory import aggregate_trajectory_error, select_reruns
+from vesp.uq.trajectory import (
+    aggregate_trajectory_error,
+    canonical_scoring_name,
+    is_absolute_scoring,
+    is_relative_scoring,
+    select_reruns,
+)
 
 
 def _load_samples(config: dict, dtype: torch.dtype) -> UQSamples:
@@ -97,6 +103,101 @@ def _resolve_time_weighting(screen_cfg: dict) -> str:
     if mode not in {"none", "kepler_r2"}:
         raise ValueError("uq.screening.time_weighting must be 'none' or 'kepler_r2'")
     return mode
+
+
+_THRESHOLD_SOURCES = ("manual", "pointwise_calibration_quantile", "trajectory_calibration_quantile")
+
+
+def _resolve_threshold(screen_cfg, plugin, held, scoring, *, dtype, seed):
+    """Resolve the absolute screening threshold and its provenance from config.
+
+    Returns ``(threshold_or_None, meta)``. ``None`` means fall back to fraction mode. ``meta``
+    records the threshold source / quantile / multiplier / calibration scoring + count and an
+    optional backward-compatibility note. Enforces that a *pointwise* expected-error budget is
+    only paired with absolute-scale scoring (never a relative supervisor score).
+    """
+
+    threshold = screen_cfg.get("threshold")
+    threshold_quantile = screen_cfg.get("threshold_quantile")
+    multiplier = float(screen_cfg.get("threshold_multiplier", 1.0))
+    src = screen_cfg.get("threshold_source")
+
+    meta = {
+        "threshold_source": None,
+        "threshold_quantile": None,
+        "threshold_multiplier": multiplier,
+        "threshold_calibration_scoring": None,
+        "threshold_calibration_n": None,
+        "threshold_compatibility_note": None,
+    }
+
+    # Backward-compatible inference when threshold_source is omitted.
+    if src is None:
+        if threshold is not None:
+            src = "manual"
+        elif threshold_quantile is not None:
+            src = "pointwise_calibration_quantile"
+            meta["threshold_compatibility_note"] = (
+                "legacy syntax: threshold_quantile without threshold_source -> inferred "
+                "pointwise_calibration_quantile (requires absolute-like scoring)"
+            )
+        else:
+            return None, meta  # no threshold configured -> fraction mode
+    src = str(src).lower()
+    if src not in _THRESHOLD_SOURCES:
+        raise ValueError(f"uq.screening.threshold_source must be one of {_THRESHOLD_SOURCES}, got {src!r}")
+
+    if src == "manual":
+        if threshold is None:
+            raise ValueError("threshold_source=manual requires uq.screening.threshold")
+        meta["threshold_source"] = "manual"
+        return float(threshold), meta
+
+    if threshold_quantile is None:
+        raise ValueError(f"threshold_source={src} requires uq.screening.threshold_quantile")
+
+    if src == "pointwise_calibration_quantile":
+        if not is_absolute_scoring(scoring):
+            why = (
+                " (a relative supervisor score is not on the pointwise expected-error scale; use "
+                "trajectory_calibration_quantile instead)"
+                if is_relative_scoring(scoring)
+                else " (use an expected_abs*/supervisor_abs* score, or trajectory_calibration_quantile)"
+            )
+            raise ValueError(
+                f"threshold_source=pointwise_calibration_quantile needs absolute-like scoring; "
+                f"got scoring={scoring!r}{why}"
+            )
+        thr = plugin.calibrate_pointwise_expected_error_threshold(
+            held.positions, quantile=float(threshold_quantile), multiplier=multiplier
+        )
+        meta.update(
+            threshold_source=src,
+            threshold_quantile=float(threshold_quantile),
+            threshold_calibration_n=int(held.positions.shape[0]),
+        )
+        return thr, meta
+
+    # trajectory_calibration_quantile: calibrate the SAME trajectory score -> safe for any scoring.
+    default_n = min(int(screen_cfg.get("n_orbits", 200)), 200)
+    cal = generate_orbit_ensemble(
+        n_orbits=int(screen_cfg.get("calibration_n_orbits", default_n)),
+        n_points=int(screen_cfg.get("calibration_n_points", int(screen_cfg.get("n_points", 48)))),
+        r_peri_range=tuple(screen_cfg.get("calibration_r_peri_range", screen_cfg.get("r_peri_range", (1.02, 1.30)))),
+        r_apo_range=tuple(screen_cfg.get("calibration_r_apo_range", screen_cfg.get("r_apo_range", (1.30, 1.60)))),
+        seed=int(seed) + 1,  # a held-out calibration ensemble, distinct from the screening one
+        dtype=dtype,
+    )
+    thr = plugin.calibrate_trajectory_risk_threshold(
+        cal.trajectories, scoring=scoring, quantile=float(threshold_quantile), multiplier=multiplier
+    )
+    meta.update(
+        threshold_source=src,
+        threshold_quantile=float(threshold_quantile),
+        threshold_calibration_scoring=scoring,
+        threshold_calibration_n=len(cal.trajectories),
+    )
+    return thr, meta
 
 
 def _stat(values) -> dict:
@@ -190,25 +291,20 @@ def run_vespuq(config: dict) -> dict:
 
     # Selection policy: an absolute threshold (optionally capped by max_rerun_fraction) takes
     # precedence over the fixed top-fraction budget. With a threshold, a safe in-distribution
-    # benchmark is allowed to flag *zero* trajectories. The threshold may be supplied directly
-    # (`threshold`) or derived from a held-out calibration quantile (`threshold_quantile`).
-    threshold = screen_cfg.get("threshold")
-    threshold_quantile = screen_cfg.get("threshold_quantile")
+    # benchmark is allowed to flag *zero* trajectories. The threshold provenance is explicit
+    # (manual | pointwise_calibration_quantile | trajectory_calibration_quantile) and the
+    # pointwise budget is rejected for relative scoring to avoid a silent scale mismatch.
     max_rerun_fraction = screen_cfg.get("max_rerun_fraction")
     rerun_fraction = float(screen_cfg.get("rerun_fraction", 0.20))
-    threshold_source = None
-    if threshold is None and threshold_quantile is not None:
-        # pointwise force-error budget: quantile of held-out per-point expected_error
-        threshold = plugin.calibrate_risk_threshold(held.positions, quantile=float(threshold_quantile))
-        threshold_source = "calibration_quantile"
+    threshold, threshold_meta = _resolve_threshold(screen_cfg, plugin, held, scoring, dtype=dtype, seed=seed)
     if threshold is not None:
         screening = select_reruns(
             risk_scores,
             threshold=float(threshold),
             max_rerun_fraction=float(max_rerun_fraction) if max_rerun_fraction is not None else None,
             true_error=true_error,
-            threshold_source=threshold_source,
-            threshold_quantile=float(threshold_quantile) if threshold_quantile is not None else None,
+            threshold_source=threshold_meta["threshold_source"],
+            threshold_quantile=threshold_meta["threshold_quantile"],
         )
     else:
         screening = select_reruns(
@@ -227,6 +323,8 @@ def run_vespuq(config: dict) -> dict:
         "experiment_1_calibration": calibration,
         "experiment_3_screening": {
             "scoring": scoring,
+            "scoring_canonical": canonical_scoring_name(scoring),
+            "scoring_scale": "relative" if is_relative_scoring(scoring) else ("absolute" if is_absolute_scoring(scoring) else "sigma"),
             "oracle_source": oracle_source,
             "n_trajectories": n_traj,
             "n_output_points_total": n_points_total,
@@ -240,6 +338,12 @@ def run_vespuq(config: dict) -> dict:
                 "radial": plugin.domain_radial_weight,
                 "angular": plugin.domain_angular_weight,
             },
+            "threshold_source": threshold_meta["threshold_source"],
+            "threshold_quantile": threshold_meta["threshold_quantile"],
+            "threshold_multiplier": threshold_meta["threshold_multiplier"],
+            "threshold_calibration_scoring": threshold_meta["threshold_calibration_scoring"],
+            "threshold_calibration_n": threshold_meta["threshold_calibration_n"],
+            "threshold_compatibility_note": threshold_meta["threshold_compatibility_note"],
             "expected_error": _expected_error_summary(scores, plugin.domain_support),
             "screen": screening.to_dict(),
         },
@@ -399,6 +503,24 @@ def build_report_md(report: dict) -> str:
     sel_mode = sc.get("selection_mode", "fraction")
     zero_alarms = sc.get("n_flagged") == 0
 
+    scoring_scale = screen.get("scoring_scale", "sigma")
+    canon = screen.get("scoring_canonical", screen["scoring"])
+    if scoring_scale == "relative":
+        scale_line = (
+            f"- **Relative scoring mode** (`{screen['scoring']}` = `{canon}`): for "
+            "prioritization/ranking only, **not** absolute physical thresholding."
+        )
+    elif scoring_scale == "absolute":
+        scale_line = (
+            f"- **Absolute scoring mode** (`{screen['scoring']}` = `{canon}`): on a fixed "
+            "force-risk scale, suitable for physical-budget / zero-alarm thresholding."
+        )
+    else:
+        scale_line = (
+            f"- Legacy **sigma** scoring mode (`{screen['scoring']}`): predictive-uncertainty "
+            "magnitude, not an expected-force-error budget."
+        )
+
     selection_line = f"- selection: `{sel_mode}`"
     if sel_mode == "fraction":
         selection_line += (
@@ -406,13 +528,24 @@ def build_report_md(report: dict) -> str:
             f"{_fmt(100 * (sc.get('requested_rerun_fraction') or 0.0), '.1f')}%)"
         )
     else:
-        selection_line += f" -> threshold (risk score) {_fmt(sc['threshold'], '.3e')}"
-        if sc.get("threshold_source"):
-            selection_line += f" [{sc['threshold_source']}]"
+        selection_line += f" -> absolute force-risk budget (risk score) {_fmt(sc['threshold'], '.3e')}"
+        tsrc = screen.get("threshold_source")
+        if tsrc:
+            extra = f"source: {tsrc}"
+            if screen.get("threshold_quantile") is not None:
+                extra += f", q={_fmt(screen['threshold_quantile'], '.3g')}"
+            if screen.get("threshold_multiplier") not in (None, 1.0):
+                extra += f", x{_fmt(screen['threshold_multiplier'], '.3g')}"
+            if screen.get("threshold_calibration_scoring"):
+                extra += f", calib scoring={screen['threshold_calibration_scoring']}"
+            if screen.get("threshold_calibration_n") is not None:
+                extra += f", calib n={screen['threshold_calibration_n']}"
+            selection_line += f" [{extra}]"
         if sc.get("max_rerun_fraction") is not None:
             selection_line += f", max rerun fraction {_fmt(sc.get('max_rerun_fraction'), '.2f')}"
         if sc.get("n_above_threshold") is not None:
             selection_line += f", {sc.get('n_above_threshold')} above threshold"
+    compat_note = screen.get("threshold_compatibility_note")
 
     sp = sc.get("spearman_risk_vs_error")
     sp_note = ""
@@ -439,16 +572,21 @@ def build_report_md(report: dict) -> str:
 
     lines += [
         "",
-        "## Experiment 3 - Trajectory risk screening",
+        "## Experiment 3 - Trajectory risk screening (force-risk vs supplied true-error metric)",
         "",
         f"- ensemble: {screen['n_trajectories']} orbits, {screen['n_output_points_total']} output points "
         f"(scoring = `{screen['scoring']}`, oracle = `{screen['oracle_source']}`, "
         f"true-error aggregator = `{screen.get('true_error_aggregator', 'p95')}`, "
         f"time-weighting = `{screen.get('time_weighting', 'none')}`"
         f"{', domain-support on' if screen.get('domain_support') else ''})",
+        scale_line,
         selection_line,
+    ]
+    if compat_note:
+        lines.append(f"- note: {compat_note}")
+    lines += [
         f"- flagged {sc['n_flagged']}/{sc['n_trajectories']} ({_fmt(100 * sc['rerun_fraction'], '.1f')}%)"
-        + ("  -- **no trajectory exceeded the absolute risk threshold (zero alarms)**" if zero_alarms and sel_mode != "fraction" else ""),
+        + ("  -- **no trajectory exceeded the absolute force-risk budget (zero alarms)**" if zero_alarms and sel_mode != "fraction" else ""),
         f"- expected-error per orbit (ensemble mean | max): mean "
         f"{_fmt((ee.get('mean_expected_error') or {}).get('mean'), '.3e')} | "
         f"max {_fmt((ee.get('max_expected_error') or {}).get('max'), '.3e')}",
@@ -456,12 +594,15 @@ def build_report_md(report: dict) -> str:
         "",
         "### What these metrics mean",
         "",
-        "- **force-risk ranking** (Spearman, lift): does the VESP-UQ *force-error* risk order "
-        "orbits the way the supplied true-error metric does?",
+        "- **force-risk score** = the VESP-UQ trajectory risk (expected force error / OOD). The "
+        "**supplied true-error metric** is an external oracle (here a position-error diagnostic) "
+        "used only to *validate* ranking; VESP-UQ does not predict it by construction.",
+        "- **force-risk ranking** (Spearman, lift): does the force-risk score order orbits the way "
+        "the supplied true-error metric does?",
         "- **trajectory-error ranking** (capture rate, error ratio): do flagged orbits carry larger "
         "*true trajectory* error -- a different question from force-risk calibration.",
-        "- **false-alarm behavior**: under an absolute threshold a safe set may flag zero; a fixed "
-        "top-fraction always flags ~`rerun_fraction` by construction.",
+        "- **false-alarm behavior**: under an absolute force-risk budget a safe set may flag zero; a "
+        "fixed top-fraction always flags ~`rerun_fraction` by construction.",
         "- **rerun prioritization**: relative supervisor modes *rank* which orbits to rerun first; "
         "absolute modes decide whether *any* orbit exceeds a physical budget.",
         "",

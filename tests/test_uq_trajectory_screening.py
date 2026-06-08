@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 import torch
 
 from vesp.core.sources import make_shell_sources
 from vesp.uq import VESPUQPlugin, make_synthetic_uq_samples, run_risk_screening
 from vesp.uq.ensemble import nearest_neighbor_error_magnitude
+from vesp.uq.run import _resolve_threshold
 
 
 def _fitted_plugin():
@@ -232,3 +235,149 @@ def test_plugin_calibrate_threshold_then_zero_alarms_on_safe_set():
     report = result["risk_screening_report"]
     assert report.selection_mode == "threshold"
     assert report.n_flagged <= 2  # safe set raises few/zero alarms under the calibrated budget
+
+
+# ============================ Phase 3: scale-mismatch hardening ============================
+
+# ---- explicit plugin calibration API (P3) ----
+
+def test_calibrate_pointwise_matches_expected_error_quantile():
+    plugin, samples = _fitted_plugin()
+    ee = plugin.predict_uncertainty(samples.positions).expected_error
+    thr = plugin.calibrate_pointwise_expected_error_threshold(samples.positions, quantile=0.9)
+    assert thr == pytest.approx(float(torch.quantile(ee, 0.9)))
+
+
+def test_calibrate_trajectory_matches_scoring_quantile():
+    plugin, _ = _fitted_plugin()
+    radii = torch.linspace(1.05, 1.50, 12, dtype=torch.float64)
+    trajs = [_circular_orbit(float(r), n=24, seed=i) for i, r in enumerate(radii)]
+    scores = plugin.score_ensemble(trajs, scoring="supervisor_rel")
+    vals = torch.tensor([sc.risk_score for sc in scores], dtype=torch.float64)
+    thr = plugin.calibrate_trajectory_risk_threshold(trajs, scoring="supervisor_rel", quantile=0.8)
+    assert thr == pytest.approx(float(torch.quantile(vals, 0.8)))
+
+
+def test_calibrate_risk_threshold_wrapper_is_backward_compatible():
+    plugin, samples = _fitted_plugin()
+    assert plugin.calibrate_risk_threshold(samples.positions, quantile=0.9) == pytest.approx(
+        plugin.calibrate_pointwise_expected_error_threshold(samples.positions, quantile=0.9)
+    )
+    trajs = [_circular_orbit(1.2, n=20, seed=i) for i in range(8)]
+    assert plugin.calibrate_risk_threshold(
+        trajectories=trajs, scoring="expected_abs", quantile=0.7
+    ) == pytest.approx(
+        plugin.calibrate_trajectory_risk_threshold(trajs, scoring="expected_abs", quantile=0.7)
+    )
+
+
+# ---- run.py threshold-source resolution + validation (P2) ----
+
+def _held(plugin_samples):
+    return SimpleNamespace(positions=plugin_samples.positions)
+
+
+def test_resolve_threshold_manual_for_any_scoring():
+    plugin, samples = _fitted_plugin()
+    thr, meta = _resolve_threshold(
+        {"threshold": 0.05}, plugin, _held(samples), "supervisor_rel", dtype=torch.float64, seed=0
+    )
+    assert thr == pytest.approx(0.05)
+    assert meta["threshold_source"] == "manual"
+
+
+def test_resolve_threshold_pointwise_rejects_relative_scoring():
+    plugin, samples = _fitted_plugin()
+    cfg = {"threshold_source": "pointwise_calibration_quantile", "threshold_quantile": 0.95}
+    with pytest.raises(ValueError):
+        _resolve_threshold(cfg, plugin, _held(samples), "supervisor_rel", dtype=torch.float64, seed=0)
+
+
+def test_resolve_threshold_pointwise_ok_for_absolute_scoring():
+    plugin, samples = _fitted_plugin()
+    cfg = {"threshold_source": "pointwise_calibration_quantile", "threshold_quantile": 0.9}
+    thr, meta = _resolve_threshold(cfg, plugin, _held(samples), "expected_abs_p95", dtype=torch.float64, seed=0)
+    assert thr > 0.0
+    assert meta["threshold_source"] == "pointwise_calibration_quantile"
+    assert meta["threshold_calibration_n"] == int(samples.positions.shape[0])
+
+
+def test_resolve_threshold_trajectory_calibration_allows_relative():
+    plugin, samples = _fitted_plugin()
+    cfg = {
+        "threshold_source": "trajectory_calibration_quantile",
+        "threshold_quantile": 0.9,
+        "calibration_n_orbits": 30,
+        "calibration_n_points": 24,
+    }
+    thr, meta = _resolve_threshold(cfg, plugin, _held(samples), "supervisor_rel", dtype=torch.float64, seed=0)
+    assert thr > 0.0
+    assert meta["threshold_source"] == "trajectory_calibration_quantile"
+    assert meta["threshold_calibration_scoring"] == "supervisor_rel"
+    assert meta["threshold_calibration_n"] == 30
+
+
+def test_resolve_threshold_legacy_quantile_infers_pointwise_and_validates():
+    plugin, samples = _fitted_plugin()
+    # legacy threshold_quantile (no threshold_source) -> inferred pointwise -> rejects relative
+    with pytest.raises(ValueError):
+        _resolve_threshold({"threshold_quantile": 0.95}, plugin, _held(samples), "supervisor_rel", dtype=torch.float64, seed=0)
+    # ...but works for absolute scoring and records a compatibility note
+    thr, meta = _resolve_threshold({"threshold_quantile": 0.95}, plugin, _held(samples), "expected_abs", dtype=torch.float64, seed=0)
+    assert thr > 0.0
+    assert meta["threshold_compatibility_note"] is not None
+
+
+def test_resolve_threshold_none_for_fraction_mode():
+    plugin, samples = _fitted_plugin()
+    thr, meta = _resolve_threshold({}, plugin, _held(samples), "supervisor_rel", dtype=torch.float64, seed=0)
+    assert thr is None
+    assert meta["threshold_source"] is None
+
+
+# ---- fit_info domain component weights (P4) ----
+
+def test_fit_info_contains_domain_component_weights_and_scales():
+    dirs, pos = _shell_cloud(400, 1.20, 1.50, seed=0)
+    g = torch.Generator().manual_seed(1)
+    err = 1.0e-4 * torch.randn(pos.shape[0], 3, generator=g, dtype=torch.float64)
+    src = make_shell_sources([0.8], [24], dtype=torch.float64)
+    plugin = VESPUQPlugin(
+        src, reg_method="lcurve", seed=0, domain_support=True,
+        domain_distance_weight=1.0, domain_radial_weight=2.0, domain_angular_weight=0.5,
+    )
+    plugin.fit_error(pos, err)
+    fi = plugin.fit_info
+    for key in (
+        "domain_distance_weight", "domain_radial_weight", "domain_angular_weight",
+        "domain_support_components", "domain_scale", "train_radius_min", "train_radius_max",
+    ):
+        assert key in fi
+    assert fi["domain_radial_weight"] == 2.0
+    assert fi["domain_support_components"] == ["distance_score", "radius_penalty", "angular_score", "total_score"]
+    assert fi["domain_angular_scale"] > 0.0  # angular weight > 0 -> angular scale present
+    import json  # all domain fit_info must be JSON-serializable
+    json.dumps({k: fi[k] for k in fi if k.startswith("domain") or k.startswith("train_radius")})
+
+
+def test_fit_info_omits_angular_scale_when_weight_zero():
+    dirs, pos = _shell_cloud(400, 1.20, 1.50, seed=2)
+    g = torch.Generator().manual_seed(3)
+    err = 1.0e-4 * torch.randn(pos.shape[0], 3, generator=g, dtype=torch.float64)
+    src = make_shell_sources([0.8], [24], dtype=torch.float64)
+    plugin = VESPUQPlugin(src, reg_method="lcurve", seed=0, domain_support=True, domain_angular_weight=0.0)
+    plugin.fit_error(pos, err)
+    assert "domain_scale" in plugin.fit_info
+    assert "domain_angular_scale" not in plugin.fit_info
+
+
+# ---- shipped configs use recognized scoring names ----
+
+def test_vespuq_configs_use_recognized_scoring():
+    from vesp.common.config import load_config
+    from vesp.uq.trajectory import SCORING_FUNCTIONS
+
+    for path in ("configs/vespuq/vespuq_smoke.yaml", "configs/vespuq/vespuq_real_lunar.yaml"):
+        cfg = load_config(path)
+        scoring = str(cfg["uq"]["risk"]["scoring"]).lower()
+        assert scoring in SCORING_FUNCTIONS

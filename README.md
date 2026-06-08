@@ -98,6 +98,32 @@ is calibrated, altitude-aware error bars and the trajectory screen they enable. 
 [`docs/VESP_UQ_IAC_PLAN.md`](docs/VESP_UQ_IAC_PLAN.md) and
 [`docs/VESP_UQ_LIMITATIONS.md`](docs/VESP_UQ_LIMITATIONS.md) for the full scope and claim boundaries.
 
+### VESP-UQ scoring modes
+
+`uq.risk.scoring` selects how the per-point risk profile is aggregated into one trajectory
+score. The scale of the score determines whether it can be used for absolute thresholds:
+
+| Mode | Alias? | Scale | Use |
+| --- | --- | --- | --- |
+| `expected_abs` | `expected` | absolute | mean expected force error |
+| `expected_abs_p95` | `expected_p95` | absolute | physical budget / robust threshold |
+| `supervisor_rel` | `supervisor` | relative | rerun prioritization |
+| `supervisor_rel_p95` | `supervisor_p95` | relative | robust rerun prioritization |
+| `supervisor_abs` | none | absolute | altitude-weighted force-risk budget |
+| `supervisor_abs_p95` | none | absolute | robust absolute alarm |
+
+- **Use relative modes for ranking** — which orbits to rerun first within one ensemble. Their
+  per-trajectory altitude normalization makes them *not* comparable across trajectories.
+- **Use absolute modes for threshold alarms** — whether any orbit exceeds a physical budget.
+- **Do not calibrate pointwise thresholds against relative trajectory scores.** A pointwise
+  `expected_error` budget (`threshold_source: pointwise_calibration_quantile`) is on the absolute
+  force-error scale; pair it only with `expected_abs*` / `supervisor_abs*`. To threshold a
+  *relative* score, use `threshold_source: trajectory_calibration_quantile`, which scores
+  calibration orbits with the same mode (the driver rejects the unsafe pairing automatically).
+
+Legacy sigma-only modes (`max | mean | low_alt_integral | time_above | combined`) remain
+available and unchanged.
+
 ## Experimental Questions
 
 The point of the framework is to make the MaxEnt-VESP idea **falsifiable**. Each
