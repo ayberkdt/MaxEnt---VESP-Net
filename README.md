@@ -1,4 +1,4 @@
-# MaxEnt-VESP / VESP-UQ
+# vesp-uq
 
 Equivalent-source modeling of lunar residual gravity: a deterministic feasibility framework
 plus a surrogate-agnostic uncertainty / risk-calibration layer, sharing one core — interior
