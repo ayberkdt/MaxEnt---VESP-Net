@@ -1,0 +1,65 @@
+# Baseline Comparison for Trajectory Force-Risk Screening
+
+This benchmark compares VESP-UQ trajectory risk scores against simple baseline selectors on a
+single, fixed target: **trajectory-level true force-model error**. It answers a narrow, technical
+question — *does the VESP-UQ score concentrate true force error better than trivial heuristics?* —
+and nothing about long-horizon trajectory **position** error.
+
+## What it tests
+
+Each selector produces one scalar score per trajectory (higher = higher risk). The top
+`rerun_fraction` are flagged and compared against the truly-high-force-error trajectories:
+
+| Selector | Idea |
+| --- | --- |
+| `random` | chance-level reference (capture ≈ rerun_fraction, lift ≈ 1) |
+| `min_altitude` | lowest periapsis ranks highest |
+| `low_altitude_exposure` | fraction of points below `low_altitude_radius` |
+| `domain_support` | mean per-point out-of-support (OOD) score (only if domain support is enabled) |
+| `uncertainty_only` | mean predictive sigma (no bias / altitude / OOD weighting) |
+| `supervisor` | full VESP-UQ supervisor (`supervisor_rel_p95`: expected error × altitude × domain) |
+
+Reported per selector: Spearman vs true force error, capture rate, precision, lift over random,
+mean true force error of flagged vs accepted trajectories, and their ratio.
+
+## Why minimum altitude is a strong simple baseline
+
+Force-model error from a band-limited / truncated gravity surrogate typically grows toward low
+altitude. A selector that simply ranks by lowest periapsis therefore captures much of the true
+force-error signal with no model at all. `min_altitude` and `low_altitude_exposure` are the bars
+VESP-UQ must clear: a supervisor score only earns its place if it ranks true force error **better**
+than these heuristics, e.g. by additionally using predictive bias and out-of-support (OOD) risk in
+directions/regimes where altitude alone is uninformative.
+
+## Why true force-model error is the target
+
+VESP-UQ scores expected *force-model* error and OOD risk. Evaluating it against force error is the
+matched, honest test of the layer. Position error is a downstream, integrator-dependent quantity
+that is often not force-error dominated; using it as the target would test a different (and not
+claimed) capability. See [`position_error_diagnostic.md`](position_error_diagnostic.md) for that
+separate diagnostic.
+
+## How to run
+
+```text
+python scripts/compare_risk_baselines.py --config configs/vespuq/vespuq_smoke.yaml
+python scripts/compare_risk_baselines.py --config configs/vespuq/vespuq_real_lunar.yaml --rerun-fraction 0.10
+```
+
+Writes `outputs/baselines/baseline_comparison.{json,csv,md}`. With an external trajectory CSV
+(`uq.screening.trajectory_source: csv`) carrying surrogate/reference acceleration pairs, the true
+force error is read directly from the residual; otherwise it uses the held-out nearest-neighbour
+force-error oracle (no leakage).
+
+## How to interpret
+
+- **VESP-UQ beats the heuristics** (higher Spearman / lift than `min_altitude` and
+  `low_altitude_exposure`): the supervisor adds force-risk ranking value beyond altitude — the
+  result to cite for the layer.
+- **VESP-UQ does not beat them**: report it plainly. On in-distribution sets where force error is
+  almost entirely altitude-driven, a min-altitude heuristic can match or exceed the supervisor;
+  that is an honest negative for the *added* value of the score on that set, not a failure of the
+  underlying calibration. Small ensembles also make capture rate / precision noisy — read Spearman
+  and lift together, and prefer larger `n_orbits` for stable numbers.
+- This is a **force-risk ranking** comparison only. It does not measure, and must not be read as,
+  prediction of trajectory position error.

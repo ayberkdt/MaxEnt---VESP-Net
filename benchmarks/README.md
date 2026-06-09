@@ -12,6 +12,7 @@ It matters *what each benchmark tests* — a result can be strong on one and nul
 | --- | --- | --- |
 | Force-risk / OOD detection | [`force_ood_detection.md`](force_ood_detection.md) | does force-risk flag low-altitude / OOD passes and rank **true force error**? |
 | Absolute-threshold screening | [`absolute_threshold_screening.md`](absolute_threshold_screening.md) | can an absolute physical budget flag **zero** (false-alarm behavior)? |
+| Baseline comparison | [`baseline_comparison.md`](baseline_comparison.md) | does the VESP-UQ score beat trivial heuristics (min-altitude, exposure) at ranking **true force error**? |
 | Position-error diagnostic | [`position_error_diagnostic.md`](position_error_diagnostic.md) | does force-risk *co-rank* long-horizon ST-LRPS **position** error? (diagnostic only) |
 
 Two scoring families are used:
