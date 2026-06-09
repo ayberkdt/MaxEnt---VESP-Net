@@ -17,6 +17,7 @@ It matters *what each benchmark tests* — a result can be strong on one and nul
 | Physical acceleration-budget screening | [`physical_budget_screening.md`](physical_budget_screening.md) | flag trajectories whose force-risk exceeds a physical acceleration-error budget (e.g. `1e-8 m/s^2`), converting the budget into model units via an explicit scale. |
 | Force-error covariance propagation (STM) | [`covariance_propagation.md`](covariance_propagation.md) | deterministic linearized (STM) `6x6` **force-error** state covariance along a nominal orbit (exploratory; **not** validated orbit determination). |
 | Force-error covariance propagation (MC) | [`covariance_propagation.md`](covariance_propagation.md) | Monte Carlo orbit-dispersion sample covariance of the **same** force-error posterior; cross-checks the STM result and agrees in the small-perturbation regime. |
+| Online force-model correction | [`online_force_correction.md`](online_force_correction.md) | does `a_corrected = a_surrogate + posterior-mean force error` cut integrated **position** error vs the bare surrogate, and at what per-RHS cost? (exploratory force-model correction) |
 | Position-error diagnostic | [`position_error_diagnostic.md`](position_error_diagnostic.md) | does force-risk *co-rank* long-horizon ST-LRPS **position** error? (diagnostic only) |
 
 Two scoring families are used:
@@ -45,6 +46,7 @@ python scripts/run_physical_budget_screening.py --config configs/vespuq/vespuq_s
     --budget 1e-8 --units m/s^2 --scoring expected_abs_p95                                  # physical acceleration budget
 python scripts/run_linear_propagation.py --config configs/vespuq/vespuq_smoke.yaml          # STM force-error covariance (deterministic)
 python scripts/run_propagation.py --config configs/vespuq/vespuq_real_lunar.yaml            # MC orbit-dispersion sampler (cross-check)
+python scripts/run_force_correction_benchmark.py --config configs/vespuq/vespuq_smoke.yaml  # online force-model correction (accuracy vs cost)
 python scripts/analyze_512_orbits.py                                             # ST-LRPS position-error diagnostic
 ```
 

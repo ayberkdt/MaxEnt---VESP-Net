@@ -89,14 +89,20 @@ local posterior into an orbit/state covariance, but only as a sampling / lineari
 process noise, and dynamic mismodelling beyond the fitted residual — is **not** implemented and must
 not be claimed.
 
-## Online correction is future work
+## Online correction: implemented as an exploratory force-model correction
 
-Adding `a_corrected(x) = a_surrogate(x) + mean_error(x)` inside an integrator's RHS is deferred
-(Phase 5). The current risk screen evaluates VESP-UQ only at **output trajectory points**
-(post-processing), not inside every integrator RHS call. The reports expose
-`n_output_points_total` and `score_us_per_output_point` to keep this explicit. Online correction
-must be benchmarked carefully because evaluating the full equivalent-source field inside every
-RHS call may erode the surrogate's speed advantage.
+`a_corrected(x) = a_surrogate(x) + mean_error(x)` is now available as an **exploratory** force-model
+correction (`vesp.uq.correction.CorrectedForceField`; benchmark
+`scripts/run_force_correction_benchmark.py`; doc `benchmarks/online_force_correction.md`). The risk
+*screen* still evaluates VESP-UQ only at **output trajectory points** (post-processing), not inside
+every integrator RHS call; the reports expose `n_output_points_total` and
+`score_us_per_output_point` to keep that explicit. The correction is the posterior **mean** (a ridge
+point estimate), so it is a **force-model** correction with no guaranteed long-horizon
+position-accuracy claim, and the benchmark reports the accuracy delta **and** the per-RHS cost —
+evaluating the full equivalent-source field inside every RHS call can erode the surrogate's speed
+advantage (the smoke run shows a large accuracy gain at ~17× the per-RHS cost). The synthetic truth
+lies in the equivalent-source span, so those numbers are a **best-case** illustration, not a
+validated result.
 
 ## Exact covariance can be expensive
 

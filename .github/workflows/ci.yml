@@ -53,3 +53,4 @@ jobs:
           python scripts/run_calibration_audit.py --config configs/vespuq/vespuq_smoke.yaml
           python scripts/run_physical_budget_screening.py --config configs/vespuq/vespuq_smoke.yaml --budget 1e-8 --units m/s^2 --scoring expected_abs_p95
           python scripts/run_linear_propagation.py --config configs/vespuq/vespuq_smoke.yaml --duration 7.0
+          python scripts/run_force_correction_benchmark.py --config configs/vespuq/vespuq_smoke.yaml --duration 7.0 --cost-reps 20

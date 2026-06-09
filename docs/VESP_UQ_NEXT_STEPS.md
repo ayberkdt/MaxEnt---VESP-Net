@@ -130,29 +130,35 @@ Open gaps found while surveying the code (evidence in parentheses):
 - **Acceptance:** met — the VESP-UQ↔adapter seam has tests; the boundary is documented. (Full adapter
   testing is explicitly out of VESP-UQ scope.)
 
-### N6 — Online force correction (Phase 5) — OPTIONAL, larger research item
+### N6 — Online force correction (Phase 5) — **DONE** (exploratory)
 
 - **Why:** the one remaining headline future-work item in the IAC plan: evaluate
   `a_corrected(x) = a_surrogate(x) + mean_error(x)` inside an integrator RHS, and benchmark the
   speed/accuracy trade-off (the docs warn that evaluating the full equivalent-source field every RHS
   call may erode the surrogate's speed advantage).
-- **Action:** add an `a_corrected` RHS hook (reusing the same operator/sign/eps convention as the MC
-  and STM propagators); a benchmark comparing surrogate vs surrogate+correction trajectories against
-  a reference, reporting both accuracy delta **and** per-RHS cost. Frame honestly: the posterior mean
-  is the ridge estimate, so this is a *force-model* correction, with no guaranteed long-horizon
-  position-accuracy claim; report measured results only.
-- **Acceptance:** benchmark runs on a synthetic reference; doc reports accuracy **and** cost with the
-  honest caveats; tests cover the RHS hook's operator consistency.
-- **Effort:** L. **Risk:** medium (scope + careful claims). Do only if explicitly desired.
+- **Done:** added `vesp.uq.correction.CorrectedForceField` (the `a_corrected` RHS hook, reusing the
+  plugin's operator/sign/eps convention so `correction(x)` equals `predict_uncertainty(x).mean_error`
+  exactly) and `integrate_trajectory` (RK4 matching the MC/STM propagators). Added
+  `scripts/run_force_correction_benchmark.py`: on a synthetic world (truth = equivalent-source field),
+  it integrates surrogate / corrected / reference orbits and reports the position-error reduction
+  **and** the per-RHS cost through the N1 artifact layer. On the smoke config the correction cut the
+  final position error ~**79×** at ~**17×** the per-RHS cost. Doc
+  `benchmarks/online_force_correction.md` + a README row frame it honestly (force-model correction,
+  best-case in-span synthetic, no long-horizon position-accuracy claim, measured numbers only). CI
+  smoke runs it; `tests/test_uq_correction.py` pins operator consistency, the integrator, and the
+  accuracy-improves / cost-increases / schema contract. Reconciled the "future work" note in
+  `docs/VESP_UQ_LIMITATIONS.md`.
+- **Acceptance:** met — benchmark runs on a synthetic reference; doc reports accuracy **and** cost
+  with honest caveats; tests cover the RHS hook's operator consistency.
 
 ## Recommended order
 
-`N0 → ~~N1~~ → ~~N2~~ → ~~N3~~ → ~~N4~~ → ~~N5~~`, with `N6` optional. **N1–N5 are done; only N6
-remains, and it is gated.** Rationale: commit first (N0); then the low-risk, high-value
-reproducibility/quality items (N1, N2) that harden everything already built; then the propagation
-capability as a documented, tested deliverable (N3) with script-level schema tests (N4); N5 bounds
-the external ST-LRPS subsystem honestly. N6 is the only item that adds new research scope and should
-be a deliberate, separately-approved choice — do it only on explicit request.
+`N0 → ~~N1~~ → ~~N2~~ → ~~N3~~ → ~~N4~~ → ~~N5~~ → ~~N6~~`. **All planned items (N1–N6) are done.**
+Rationale: commit first (N0); then the low-risk, high-value reproducibility/quality items (N1, N2)
+that harden everything already built; then the propagation capability as a documented, tested
+deliverable (N3) with script-level schema tests (N4); N5 bounds the external ST-LRPS subsystem
+honestly. N6 — the one new-research item — was done last, on explicit request, as an **exploratory**
+force-model correction reporting measured accuracy **and** cost with honest caveats.
 
 ## Out of scope (and why)
 
