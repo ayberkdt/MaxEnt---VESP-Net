@@ -50,6 +50,19 @@ result, and a null force-risk vs position-error correlation is *expected* (posit
 not force-model-error dominated). Do not claim a validated ST-LRPS integration on the basis of this
 wiring.
 
+### Adapter scope: only the force-model seam is in scope (the rest is vendored)
+
+The full `vesp.adapters.st_lrps` package (~70 files) is **vendored, exploratory** ST-LRPS code and is
+**out of VESP-UQ scope**: it is not maintained, refactored, or tested as part of the calibration
+layer, and it depends on the external `lunaris` package, so it is **not importable in a clean
+VESP-UQ environment** (CI included). The **only** VESP-UQ↔adapter seam is
+`vesp.adapters.st_lrps.runtime.force_model.load_surrogate_force_model` (used by
+`scripts/run_stlrps_propagation.py` as the MC base field). That seam — and only that seam — is
+bounded by VESP-UQ tests (`tests/test_stlrps_adapter_boundary.py`: an import-safety guard plus a
+skip-guarded artifact-load smoke, both skipping when the adapter / `lunaris` / artifact are absent).
+Full adapter testing or refactoring is explicitly **not** a VESP-UQ deliverable. See
+`src/vesp/adapters/README.md`.
+
 ### ST-LRPS diagnostic vs integration
 
 `scripts/analyze_512_orbits.py` *reads* precomputed `ST_LRPS_DT60` position-error metrics to ask a
@@ -70,9 +83,11 @@ does not exist yet.
 ### Local force-error covariance vs orbit/state covariance propagation
 
 VESP-UQ implements the **local** predictive acceleration-error covariance `Sigma_a(x)` (the full
-`3x3` per-point covariance). It does **not** propagate that into a state/orbit covariance through
-an integrator (STM / process-noise / Monte Carlo). The local covariance is implemented; the
-propagation is not, and must not be claimed.
+`3x3` per-point covariance). The **exploratory** MC and linearized-STM propagators above map that
+local posterior into an orbit/state covariance, but only as a sampling / linearization diagnostic. A
+**validated operational** state/orbit covariance — one that models measurement processing, realistic
+process noise, and dynamic mismodelling beyond the fitted residual — is **not** implemented and must
+not be claimed.
 
 ## Online correction is future work
 

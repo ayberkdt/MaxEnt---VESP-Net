@@ -100,30 +100,35 @@ Open gaps found while surveying the code (evidence in parentheses):
 - **Acceptance:** met — script runs on the smoke config and writes artifacts; the doc states the
   honest scope; CI smoke covers the new script.
 
-### N4 — Script-level test coverage (MEDIUM)
+### N4 — Script-level test coverage — **DONE**
 
-- **Why:** `run_calibration_audit`, `run_force_error_benchmark`, `compare_risk_baselines`,
-  `run_propagation` are only exercised by the CI smoke step (no pytest assertions on their output
-  schemas), so their JSON/CSV contracts can drift silently.
-- **Action:** add focused tests (tiny synthetic config, `tmp_path`) asserting each script's JSON keys
-  / CSV header / row counts and a couple of invariants (e.g. flagged ⊆ trajectories). Reuse the
-  `_tiny_screening_config` pattern already in `tests/test_uq_physical_budget_screening.py`.
-- **Acceptance:** one test module per script (or a combined `tests/test_uq_scripts.py`); output
-  schemas locked.
-- **Effort:** M. **Risk:** low.
+- **Why:** `run_calibration_audit`, `run_force_error_benchmark`, `compare_risk_baselines` were only
+  exercised by the CI smoke step (no pytest assertions on their output schemas), so their JSON/CSV
+  contracts could drift silently.
+- **Done:** added `tests/test_uq_scripts.py` — one test per artifact-writing script asserting the
+  JSON keys, CSV header + row count, and invariants (`flagged ⊆ trajectories`,
+  `n_flagged ≤ n_trajectories`, `is_position_error_benchmark` is False). `run_propagation` writes no
+  files (nothing to lock) and its MC core is already covered by `tests/test_uq_propagation.py`, so it
+  gets only an import-safety guard; `run_linear_propagation` / `run_physical_budget_screening` are
+  locked by their own modules, and the artifact/manifest contract by `tests/test_uq_run_artifacts.py`.
+- **Acceptance:** met — output schemas locked; suite at 378 tests.
 
-### N5 — ST-LRPS adapter boundary: bound it honestly (LOW, bounded)
+### N5 — ST-LRPS adapter boundary: bound it honestly — **DONE**
 
-- **Why:** `src/vesp/adapters/st_lrps` (72 files) is exploratory wiring with zero tests; its only
+- **Why:** `src/vesp/adapters/st_lrps` (~70 files) is exploratory wiring with zero tests; its only
   VESP-UQ touchpoint is `scripts/run_stlrps_propagation.py` (uses the runtime force model as the MC
   base field).
-- **Action (minimal):** add an import-safety test for the adapter package boundary the VESP-UQ side
-  depends on (`vesp.adapters.st_lrps.runtime.force_model.load_surrogate_force_model` importable
-  without heavy side effects), and a skip-guarded smoke test for `run_stlrps_propagation.py` (skip
-  when no ST-LRPS artifact is present). Document explicitly that the rest of the adapter is
-  out-of-scope vendored code.
-- **Acceptance:** the VESP-UQ↔adapter seam has at least one test; the boundary is documented.
-- **Effort:** S. **Risk:** low. (Full adapter testing is explicitly out of VESP-UQ scope.)
+- **Done:** added `tests/test_stlrps_adapter_boundary.py` — an import-safety guard for the seam
+  (`load_surrogate_force_model`) and the script, plus a skip-guarded artifact-load smoke
+  (`VESP_STLRPS_MODEL_DIR`) asserting the exact interface VESP-UQ depends on (`mu_si`, `degree_min`,
+  `predict_residual_accel_fixed`). The adapter depends on the external `lunaris` package (not
+  vendored here, not a declared dep), so it is not importable in a clean VESP-UQ environment; the
+  tests `importorskip` and therefore **skip in CI** by design (they run where the adapter is
+  installed). Documented the boundary in `src/vesp/adapters/README.md` and a new
+  `docs/VESP_UQ_LIMITATIONS.md` subsection ("Adapter scope: only the force-model seam is in scope"),
+  and reconciled the stale local-vs-orbit-covariance note there now that the N3 propagators exist.
+- **Acceptance:** met — the VESP-UQ↔adapter seam has tests; the boundary is documented. (Full adapter
+  testing is explicitly out of VESP-UQ scope.)
 
 ### N6 — Online force correction (Phase 5) — OPTIONAL, larger research item
 
@@ -142,12 +147,12 @@ Open gaps found while surveying the code (evidence in parentheses):
 
 ## Recommended order
 
-`N0 → ~~N1~~ → ~~N2~~ → ~~N3~~ → N4`, with `N5`/`N6` optional. **N1–N3 are done; N4 is next.**
-Rationale: commit first (N0); then the low-risk, high-value reproducibility/quality items (N1, N2)
-that harden everything already built; then complete the propagation capability into a documented,
-tested deliverable (N3 done, N4 next — pytest-level output-schema assertions for the remaining
-smoke-only scripts). N5 bounds an external subsystem honestly; N6 is the only item that adds new
-research scope and should be a deliberate, separately-approved choice.
+`N0 → ~~N1~~ → ~~N2~~ → ~~N3~~ → ~~N4~~ → ~~N5~~`, with `N6` optional. **N1–N5 are done; only N6
+remains, and it is gated.** Rationale: commit first (N0); then the low-risk, high-value
+reproducibility/quality items (N1, N2) that harden everything already built; then the propagation
+capability as a documented, tested deliverable (N3) with script-level schema tests (N4); N5 bounds
+the external ST-LRPS subsystem honestly. N6 is the only item that adds new research scope and should
+be a deliberate, separately-approved choice — do it only on explicit request.
 
 ## Out of scope (and why)
 
