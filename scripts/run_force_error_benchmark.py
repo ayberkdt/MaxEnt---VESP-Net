@@ -19,12 +19,12 @@ Outputs (under --out-dir, default outputs/iac):
 from __future__ import annotations
 
 import argparse
-import json
 from pathlib import Path
 
 import torch
 
 from vesp.common.config import get_dtype, load_config
+from vesp.uq.io.run_artifacts import write_run_artifacts
 from vesp.uq.data import split_uq_samples
 from vesp.uq.ensemble import generate_orbit_ensemble, nearest_neighbor_error_magnitude
 from vesp.uq.experiment import _load_samples
@@ -152,13 +152,17 @@ def _benchmark_md(n: dict) -> str:
 
 def run_and_write(config: dict, *, out_dir: Path, scoring: str | None, rerun_fraction: float) -> dict:
     numbers = force_error_benchmark(config, scoring=scoring, rerun_fraction=rerun_fraction)
-    out_dir.mkdir(parents=True, exist_ok=True)
     rows = numbers.pop("_scores")
-    (out_dir / "force_error_benchmark.json").write_text(json.dumps(numbers, indent=2), encoding="utf-8")
-    (out_dir / "force_error_benchmark.md").write_text(_benchmark_md(numbers), encoding="utf-8")
+    markdown = _benchmark_md(numbers)
     header = ["trajectory_id", "force_risk", "true_force_error", "flagged"]
-    lines = [",".join(header)] + [",".join(str(r[h]) for h in header) for r in rows]
-    (out_dir / "force_error_scores.csv").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    csv_text = "\n".join([",".join(header)] + [",".join(str(r[h]) for h in header) for r in rows]) + "\n"
+    write_run_artifacts(
+        out_dir,
+        tool="run_force_error_benchmark",
+        config=config,
+        json_files={"force_error_benchmark.json": numbers},
+        text_files={"force_error_benchmark.md": markdown, "force_error_scores.csv": csv_text},
+    )
     return numbers
 
 
@@ -169,8 +173,10 @@ def main(argv=None) -> None:
     parser.add_argument("--scoring", default=None, help="default supervisor_rel_p95")
     parser.add_argument("--rerun-fraction", type=float, default=0.10)
     args = parser.parse_args(argv)
+    config = load_config(args.config)
+    config.setdefault("_config_path", args.config)
     numbers = run_and_write(
-        load_config(args.config),
+        config,
         out_dir=Path(args.out_dir),
         scoring=args.scoring,
         rerun_fraction=args.rerun_fraction,

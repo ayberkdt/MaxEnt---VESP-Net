@@ -43,3 +43,7 @@ python scripts/run_physical_budget_screening.py --config configs/vespuq/vespuq_s
     --budget 1e-8 --units m/s^2 --scoring expected_abs_p95                                  # physical acceleration budget
 python scripts/analyze_512_orbits.py                                             # ST-LRPS position-error diagnostic
 ```
+
+Each VESP-UQ script writes a `run_manifest.json` alongside its outputs, recording the config
+snapshot, seed, environment, and a SHA-256 checksum + byte size for every emitted file, and embeds a
+`_provenance` block in each JSON — so a result can be traced back to the exact config and verified.

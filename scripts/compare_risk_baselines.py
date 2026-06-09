@@ -14,10 +14,11 @@ Outputs (under --out-dir, default outputs/baselines):
 from __future__ import annotations
 
 import argparse
-import json
 from pathlib import Path
 
 import torch
+
+from vesp.uq.io.run_artifacts import write_run_artifacts
 
 from vesp.common.config import get_dtype, load_config
 from vesp.uq.baselines import (
@@ -169,16 +170,19 @@ def _comparison_md(p: dict) -> str:
     return "\n".join(lines) + "\n"
 
 
-def write_outputs(payload: dict, out_dir: Path) -> None:
-    out_dir.mkdir(parents=True, exist_ok=True)
-    (out_dir / "baseline_comparison.json").write_text(json.dumps(payload, indent=2), encoding="utf-8")
+def write_outputs(payload: dict, out_dir: Path, *, config: dict | None = None) -> None:
     header = ["baseline", *METRIC_KEYS]
     rows = [header]
     for name, m in payload["baselines"].items():
         rows.append([name, *[m.get(k) for k in METRIC_KEYS]])
     csv_text = "\n".join(",".join("" if v is None else str(v) for v in row) for row in rows) + "\n"
-    (out_dir / "baseline_comparison.csv").write_text(csv_text, encoding="utf-8")
-    (out_dir / "baseline_comparison.md").write_text(_comparison_md(payload), encoding="utf-8")
+    write_run_artifacts(
+        out_dir,
+        tool="compare_risk_baselines",
+        config=config,
+        json_files={"baseline_comparison.json": payload},
+        text_files={"baseline_comparison.csv": csv_text, "baseline_comparison.md": _comparison_md(payload)},
+    )
 
 
 def main(argv=None) -> None:
@@ -188,9 +192,11 @@ def main(argv=None) -> None:
     parser.add_argument("--rerun-fraction", type=float, default=0.10)
     args = parser.parse_args(argv)
 
-    payload = run_baseline_comparison(load_config(args.config), rerun_fraction=args.rerun_fraction)
+    config = load_config(args.config)
+    config.setdefault("_config_path", args.config)
+    payload = run_baseline_comparison(config, rerun_fraction=args.rerun_fraction)
     out_dir = Path(args.out_dir)
-    write_outputs(payload, out_dir)
+    write_outputs(payload, out_dir, config=config)
     print(_comparison_md(payload))
     print(f"saved_baseline_comparison: {out_dir / 'baseline_comparison.md'}")
 

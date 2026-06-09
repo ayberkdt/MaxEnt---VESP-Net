@@ -51,19 +51,16 @@ Open gaps found while surveying the code (evidence in parentheses):
 - **Acceptance:** clean working tree; CI green on the pushed branch.
 - **Effort:** XS.
 
-### N1 — Reproducibility: route script outputs through the artifact/manifest system (HIGH)
+### N1 — Reproducibility: route script outputs through the artifact/manifest system — **DONE**
 
 - **Why:** reproducibility is a stated project value, but `run_calibration_audit`,
-  `run_physical_budget_screening`, `run_force_error_benchmark`, `compare_risk_baselines` write bare
-  JSON/MD/CSV with no run manifest, config snapshot, or SHA-256 checksums — unlike `vesp.uq.run`,
-  which uses `ensure_run_layout` + `atomic_write_*` + `write_run_manifest`.
-- **Action:** add a small shared helper (e.g. `vesp.uq.io.run_artifacts`) wrapping
-  `vesp.common.artifacts` (`ensure_run_layout`, `atomic_write_json/text`, `compute_file_sha256`,
-  `write_run_manifest`). Route every uq script through it; embed `config`, `seed`, and a UTC
-  timestamp in each JSON; write a per-run manifest with output checksums.
-- **Acceptance:** each script writes a manifest with config + checksums; a test asserts the manifest
-  exists and checksums match; existing output filenames preserved.
-- **Effort:** M. **Risk:** low (additive; no behavior change to the numbers).
+  `run_physical_budget_screening`, `run_force_error_benchmark`, `compare_risk_baselines` wrote bare
+  JSON/MD/CSV with no run manifest, config snapshot, or SHA-256 checksums.
+- **Done:** added `vesp.uq.io.run_artifacts.write_run_artifacts` (atomic writes + injected
+  `_provenance` per JSON + `run_manifest.json` with config snapshot, seed, environment, and per-file
+  SHA-256 + byte size). Routed all four scripts through it and added a `write_run_manifest` to the
+  main `vesp.uq.run`. Output filenames preserved. Tests in `tests/test_uq_run_artifacts.py` assert
+  the manifest exists and its checksums match the files on disk (369 tests pass).
 
 ### N2 — Code quality: lint + format check in CI (MEDIUM-HIGH)
 
@@ -133,11 +130,11 @@ Open gaps found while surveying the code (evidence in parentheses):
 
 ## Recommended order
 
-`N0 → N1 → N2 → N3 → N4`, with `N5`/`N6` optional. Rationale: commit first (N0); then the two
-low-risk, high-value reproducibility/quality items (N1, N2) that harden everything already built;
-then complete the propagation capability into a documented, tested deliverable (N3, N4). N5 bounds
-an external subsystem honestly; N6 is the only item that adds new research scope and should be a
-deliberate, separately-approved choice.
+`N0 → ~~N1~~ → N2 → N3 → N4`, with `N5`/`N6` optional. **N1 is done.** Rationale: commit first (N0);
+then the low-risk, high-value reproducibility/quality items (N1 done, N2 next) that harden everything
+already built; then complete the propagation capability into a documented, tested deliverable
+(N3, N4). N5 bounds an external subsystem honestly; N6 is the only item that adds new research scope
+and should be a deliberate, separately-approved choice.
 
 ## Out of scope (and why)
 

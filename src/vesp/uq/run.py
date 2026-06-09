@@ -16,7 +16,12 @@ import argparse
 from pathlib import Path
 from typing import Iterable
 
-from vesp.common.artifacts import atomic_write_json, atomic_write_text, ensure_run_layout
+from vesp.common.artifacts import (
+    atomic_write_json,
+    atomic_write_text,
+    ensure_run_layout,
+    write_run_manifest,
+)
 from vesp.common.config import load_config
 from vesp.uq.experiment import _resolve_time_weighting, _time_weights, run_vespuq
 from vesp.uq.reporting import build_report_md, build_tables, calibration_table, csv_text
@@ -54,6 +59,21 @@ def run(config: dict) -> dict:
     )
     atomic_write_text(
         run_dir / "flagged_trajectories.csv", csv_text(tables["trajectory_header"], tables["flagged_rows"])
+    )
+
+    # Provenance manifest: config snapshot + SHA-256 checksums of every emitted artifact.
+    write_run_manifest(
+        run_dir,
+        config=config,
+        metrics=report.get("summary", {}),
+        artifacts={
+            "vespuq_report_json": run_dir / "vespuq_report.json",
+            "vespuq_report_md": run_dir / "vespuq_report.md",
+            "fit_summary_json": run_dir / "fit_summary.json",
+            "calibration_by_band_csv": run_dir / "calibration_by_band.csv",
+            "trajectory_scores_csv": run_dir / "trajectory_scores.csv",
+            "flagged_trajectories_csv": run_dir / "flagged_trajectories.csv",
+        },
     )
 
     print(markdown.encode("ascii", "replace").decode("ascii"))

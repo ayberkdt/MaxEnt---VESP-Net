@@ -24,13 +24,13 @@ position-error or orbit-covariance diagnostic.
 from __future__ import annotations
 
 import argparse
-import json
 from pathlib import Path
 
 import torch
 
 from vesp.common.config import get_dtype, load_config
 from vesp.uq.audit import audit_summary_dict, evaluate_false_negatives, select_sentinel_audit
+from vesp.uq.io.run_artifacts import write_run_artifacts
 from vesp.uq.conformal import coverage_before_after, fit_conformal_scale
 from vesp.uq.data import split_uq_samples
 from vesp.uq.ensemble import nearest_neighbor_error_magnitude
@@ -293,14 +293,17 @@ def _audit_md(report: dict) -> str:
 
 def run_and_write(config: dict, *, out_dir: Path) -> dict:
     report = run_calibration_audit(config)
-    out_dir.mkdir(parents=True, exist_ok=True)
     rows = report.pop("_sentinel_rows")
-
-    (out_dir / "calibration_audit.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
-    (out_dir / "calibration_audit.md").write_text(_audit_md(report), encoding="utf-8")
+    markdown = _audit_md(report)
     header = ["trajectory_id", "risk_score", "true_force_error", "is_high_force_error", "flagged"]
-    lines = [",".join(header)] + [",".join(str(r[h]) for h in header) for r in rows]
-    (out_dir / "sentinel_audit.csv").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    csv_text = "\n".join([",".join(header)] + [",".join(str(r[h]) for h in header) for r in rows]) + "\n"
+    write_run_artifacts(
+        out_dir,
+        tool="run_calibration_audit",
+        config=config,
+        json_files={"calibration_audit.json": report},
+        text_files={"calibration_audit.md": markdown, "sentinel_audit.csv": csv_text},
+    )
     return report
 
 

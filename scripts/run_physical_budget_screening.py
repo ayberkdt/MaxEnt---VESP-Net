@@ -21,11 +21,11 @@ orbit-covariance diagnostic and does not guarantee safety.
 from __future__ import annotations
 
 import argparse
-import json
 from pathlib import Path
 
 from vesp.common.config import load_config
 from vesp.uq.experiment import run_vespuq
+from vesp.uq.io.run_artifacts import write_run_artifacts
 from vesp.uq.physical_units import acceleration_to_physical, resolve_acceleration_scale
 from vesp.uq.scoring import is_absolute_scoring, is_relative_scoring
 from vesp.uq.thresholds import PHYSICAL_BUDGET_SCORINGS
@@ -216,19 +216,21 @@ def _screening_md(result: dict) -> str:
 
 def run_and_write(config: dict, *, out_dir: Path) -> dict:
     result = run_physical_budget_screening(config)
-    out_dir.mkdir(parents=True, exist_ok=True)
     rows = result["_rows"]
     markdown = _screening_md(result)
     serializable = {k: v for k, v in result.items() if k != "_rows"}
-
-    (out_dir / "physical_budget_screening.json").write_text(json.dumps(serializable, indent=2), encoding="utf-8")
-    (out_dir / "physical_budget_screening.md").write_text(markdown, encoding="utf-8")
     csv_header = [
         "trajectory_id", "risk_score_model", "risk_score_physical",
         "true_force_error_model", "true_force_error_physical", "above_budget", "flagged",
     ]
-    lines = [",".join(csv_header)] + [",".join(str(r[h]) for h in csv_header) for r in rows]
-    (out_dir / "physical_budget_scores.csv").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    csv_text = "\n".join([",".join(csv_header)] + [",".join(str(r[h]) for h in csv_header) for r in rows]) + "\n"
+    write_run_artifacts(
+        out_dir,
+        tool="run_physical_budget_screening",
+        config=config,
+        json_files={"physical_budget_screening.json": serializable},
+        text_files={"physical_budget_screening.md": markdown, "physical_budget_scores.csv": csv_text},
+    )
     result["_markdown"] = markdown
     return result
 
