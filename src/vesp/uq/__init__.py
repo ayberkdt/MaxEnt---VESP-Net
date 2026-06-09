@@ -19,6 +19,7 @@ from vesp.uq.metrics import (
     mahalanobis_squared,
     vector_calibration_metrics,
 )
+from vesp.uq.io import TrajectoryDataset, flatten_acceleration_pairs, load_trajectory_csv
 from vesp.uq.plugin import CovariancePrediction, UncertaintyPrediction, VESPUQPlugin
 from vesp.uq.trajectory import (
     RiskScreeningReport,
@@ -57,4 +58,7 @@ __all__ = [
     "vector_calibration_metrics",
     "mahalanobis_squared",
     "diagonal_covariances",
+    "TrajectoryDataset",
+    "load_trajectory_csv",
+    "flatten_acceleration_pairs",
 ]

@@ -53,13 +53,23 @@ Established results (report as-is, do not soften):
   (≤60) / conditioning ceiling, not a cheap geometry fix → it should be **quantified** by the
   posterior (heteroscedastic Stage 3C+), not assumed reducible by geometry.
 
+Implemented in the `vesp.uq` force-risk layer:
+
+- the **local predictive acceleration-error covariance `Sigma_a(x)`** (the full `3x3` per-point
+  covariance, `VESPUQPlugin.predict_covariance_3x3`), plus expected-force-error and
+  domain-support / OOD scoring and trajectory-level selective-rerun screening,
+- a **simple post-hoc altitude-dependent heteroscedastic recalibration** of the predictive noise
+  (`floor + a·h^(-b)`, 2 parameters) fit on held-out validation residuals.
+
 Not implemented yet (do not claim):
 
 - full nonlinear / variational Bayesian posterior or sampling-based inference (Stage 3C is
   the **exact conjugate Gaussian** posterior for the linear model, not MCMC/VI),
-- a learned or heteroscedastic noise model,
+- a **learned / full / generative / nonlinear** heteroscedastic noise model (only the simple
+  2-parameter post-hoc recalibration above is implemented — do not call it learned/generative),
+- **orbit/state covariance propagation**: the *local* force-error covariance `Sigma_a(x)` is
+  implemented, but propagating it into a state/orbit covariance through an integrator is not,
 - neural source-density network,
-- orbit propagation uncertainty,
 - irregular-body source placement.
 
 ## Allowed claims

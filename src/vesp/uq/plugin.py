@@ -39,8 +39,14 @@ from vesp.extensions.probabilistic import (
     LinearGaussianPosterior,
     calibration_metrics,
 )
+from vesp.uq.domain_support import (
+    domain_support_components as _domain_support_components,
+    make_domain_backend,
+    median_angular_scale,
+    median_knn_scale,
+)
 from vesp.uq.metrics import vector_calibration_metrics
-from vesp.uq.trajectory import (
+from vesp.uq.scoring import (
     TrajectoryScore,
     calibrate_risk_threshold as _calibrate_risk_threshold,
     score_sigma_profile,
@@ -126,6 +132,7 @@ class VESPUQPlugin:
         domain_distance_weight: float = 1.0,
         domain_radial_weight: float = 1.0,
         domain_angular_weight: float = 0.0,
+        domain_backend: str = "torch",
         dtype: torch.dtype = torch.float64,
         device: torch.device | str = "cpu",
         seed: int = 0,
@@ -161,6 +168,7 @@ class VESPUQPlugin:
         self.domain_distance_weight = float(domain_distance_weight)
         self.domain_radial_weight = float(domain_radial_weight)
         self.domain_angular_weight = float(domain_angular_weight)
+        self.domain_backend = str(domain_backend).lower()
         self.seed = int(seed)
 
         self.posterior: LinearGaussianPosterior | None = None
@@ -175,6 +183,7 @@ class VESPUQPlugin:
         self._domain_scale: float | None = None
         self._domain_scale_k: int | None = None
         self._domain_angular_scale: float | None = None
+        self._domain_backend_impl = None  # lazily constructed (honors scipy fallback)
 
     # ------------------------------------------------------------------ construction
     @classmethod
@@ -235,6 +244,7 @@ class VESPUQPlugin:
             domain_distance_weight=float(risk.get("domain_distance_weight", 1.0)),
             domain_radial_weight=float(risk.get("domain_radial_weight", 1.0)),
             domain_angular_weight=float(risk.get("domain_angular_weight", 0.0)),
+            domain_backend=str(risk.get("domain_backend", "torch")).lower(),
             dtype=dtype,
             device=device,
             seed=int(config.get("seed", 0)),
@@ -425,6 +435,7 @@ class VESPUQPlugin:
             "covariance_mode": self.covariance_mode,
             "n_sources": int(self.sources.n_sources),
             "domain_support_enabled": self.domain_support,
+            "domain_backend": self.domain_backend,
             "domain_k": self.domain_k,
             "domain_weight": float(self.domain_weight),
             "domain_distance_weight": float(self.domain_distance_weight),
@@ -559,65 +570,34 @@ class VESPUQPlugin:
         )
 
     # ------------------------------------------------------------------ domain support
-    def _domain_nn_scale(self, k: int, *, subset: int = 512) -> float:
-        """Robust training-set length scale: median ``k``-th nearest-neighbour distance.
+    def _domain_backend(self):
+        """Lazily construct the domain-support nearest-neighbour backend (scipy-safe fallback)."""
 
-        Computed over a random subset of training points (excluding self), cached per ``k``.
-        Used to normalize :meth:`domain_support_score` so that a query sitting at the typical
-        training spacing scores ~0 and points farther out score progressively higher.
-        """
+        if self._domain_backend_impl is None:
+            self._domain_backend_impl = make_domain_backend(self.domain_backend)
+        return self._domain_backend_impl
+
+    def _domain_nn_scale(self, k: int, *, subset: int = 512) -> float:
+        """Robust training-set length scale: median ``k``-th nearest-neighbour distance (cached)."""
 
         if self.train_positions is None:
             raise RuntimeError("domain support needs a fit; train positions are not stored")
         if self._domain_scale is not None and self._domain_scale_k == k:
             return self._domain_scale
-        train = self.train_positions
-        n = int(train.shape[0])
-        if n < 2:
-            scale = 1.0
-        else:
-            g = torch.Generator().manual_seed(self.seed)
-            sub_idx = torch.randperm(n, generator=g)[: min(subset, n)]
-            sub = train[sub_idx]
-            kk = min(k + 1, n)  # +1 to drop the self-distance (0)
-            knn = torch.empty(sub.shape[0], dtype=self.dtype, device=self.device)
-            for start in range(0, sub.shape[0], 1024):
-                d = torch.cdist(sub[start : start + 1024], train)
-                knn[start : start + 1024] = torch.topk(d, kk, largest=False).values[:, -1]
-            scale = float(torch.median(knn))
-        scale = max(scale, 1.0e-12)
+        scale = median_knn_scale(
+            self.train_positions, k, backend=self._domain_backend(), seed=self.seed, subset=subset
+        )
         self._domain_scale, self._domain_scale_k = scale, k
         return scale
-
-    def _unit_directions(self, x: torch.Tensor) -> torch.Tensor:
-        """Row-normalize positions to unit direction vectors (for the angular component)."""
-
-        r = torch.linalg.norm(x, dim=-1, keepdim=True).clamp_min(torch.finfo(self.dtype).tiny)
-        return x / r
 
     def _domain_angular_nn_scale(self, k: int, *, subset: int = 512) -> float:
         """Robust angular spacing: median ``k``-th nearest training-direction angle (radians)."""
 
-        if self._domain_angular_scale is not None:
-            return self._domain_angular_scale
-        train = self.train_positions
-        n = int(train.shape[0])
-        if n < 2:
-            scale = 1.0
-        else:
-            u = self._unit_directions(train)
-            g = torch.Generator().manual_seed(self.seed + 1)
-            sub = u[torch.randperm(n, generator=g)[: min(subset, n)]]
-            kk = min(k + 1, n)  # +1 to drop the self-pair (angle 0)
-            ang = torch.empty(sub.shape[0], dtype=self.dtype, device=self.device)
-            for start in range(0, sub.shape[0], 1024):
-                cos = (sub[start : start + 1024] @ u.transpose(0, 1)).clamp(-1.0, 1.0)
-                kth_cos = torch.topk(cos, kk, largest=True).values[:, -1]
-                ang[start : start + 1024] = torch.arccos(kth_cos)
-            scale = float(torch.median(ang))
-        scale = max(scale, 1.0e-9)
-        self._domain_angular_scale = scale
-        return scale
+        if self._domain_angular_scale is None:
+            self._domain_angular_scale = median_angular_scale(
+                self.train_positions, k, seed=self.seed + 1, subset=subset
+            )
+        return self._domain_angular_scale
 
     def domain_support_components(
         self, positions, k: int | None = None, *, chunk: int = 1024
@@ -645,49 +625,20 @@ class VESPUQPlugin:
             raise RuntimeError("domain support needs a fit; call fit(...)/fit_error(...) first")
         k = int(self.domain_k if k is None else k)
         pos = self._prep_positions(positions)
-        train = self.train_positions
-        n_train = int(train.shape[0])
-        n_q = int(pos.shape[0])
-        k_eff = max(1, min(k, n_train))
-        scale = self._domain_nn_scale(k)
-
         want_angular = self.domain_angular_weight > 0.0
-        knn = torch.empty(n_q, dtype=self.dtype, device=self.device)
-        ang_nn = torch.empty(n_q, dtype=self.dtype, device=self.device) if want_angular else None
-        if want_angular:
-            u_train = self._unit_directions(train)
-            u_q = self._unit_directions(pos)
-        for start in range(0, n_q, chunk):
-            d = torch.cdist(pos[start : start + chunk], train)
-            knn[start : start + chunk] = torch.topk(d, k_eff, largest=False).values[:, -1]
-            if want_angular:
-                cos = (u_q[start : start + chunk] @ u_train.transpose(0, 1)).clamp(-1.0, 1.0)
-                kth_cos = torch.topk(cos, k_eff, largest=True).values[:, -1]
-                ang_nn[start : start + chunk] = torch.arccos(kth_cos)
-
-        distance_score = (knn / scale - 1.0).clamp_min(0.0)
-
-        radius = torch.linalg.norm(pos, dim=-1)
-        r_min = float(self.train_radii.min())
-        r_max = float(self.train_radii.max())
-        below = (r_min - radius).clamp_min(0.0)
-        above = (radius - r_max).clamp_min(0.0)
-        radius_penalty = (below + above) / scale
-
-        if want_angular:
-            angular_score = (ang_nn / self._domain_angular_nn_scale(k) - 1.0).clamp_min(0.0)
-        else:
-            angular_score = torch.zeros(n_q, dtype=self.dtype, device=self.device)
-
-        d_c = (self.domain_distance_weight * distance_score).clamp_min(0.0)
-        r_c = (self.domain_radial_weight * radius_penalty).clamp_min(0.0)
-        a_c = (self.domain_angular_weight * angular_score).clamp_min(0.0)
-        return {
-            "distance_score": d_c,
-            "radius_penalty": r_c,
-            "angular_score": a_c,
-            "total_score": (d_c + r_c + a_c).clamp_min(0.0),
-        }
+        return _domain_support_components(
+            pos,
+            self.train_positions,
+            self.train_radii,
+            k=k,
+            distance_scale=self._domain_nn_scale(k),
+            distance_weight=self.domain_distance_weight,
+            radial_weight=self.domain_radial_weight,
+            angular_weight=self.domain_angular_weight,
+            angular_scale=self._domain_angular_nn_scale(k) if want_angular else None,
+            backend=self._domain_backend(),
+            chunk=chunk,
+        )
 
     def domain_support_score(self, positions, k: int | None = None, *, chunk: int = 1024) -> torch.Tensor:
         """Total per-position domain-support score (sum of :meth:`domain_support_components`)."""

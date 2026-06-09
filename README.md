@@ -53,14 +53,24 @@ unit-safe potential/acceleration scaling; diagnostics for source collapse, shell
 cancellation, and monopole/dipole leakage; deterministic entropy regularization over
 source strengths.
 
-Not implemented yet: full Bayesian/MaxEnt posterior; neural source-density network;
-probabilistic `q(sigma | data)`; acceleration covariance; orbit-propagation
-uncertainty; irregular-body source placement.
+Implemented in the `vesp.uq` layer: the exact linear-Gaussian source posterior and the **local
+predictive acceleration-error covariance `Sigma_a(x)`** (`VESPUQPlugin.predict_covariance_3x3`).
+
+Not implemented yet: full nonlinear/variational Bayesian posterior; neural source-density network;
+**orbit/state covariance propagation** that consumes `Sigma_a(x)` through an integrator (the
+*local* force-error covariance is implemented; propagating it into a state covariance is not);
+irregular-body source placement.
 
 The binding policy on what may and may not be claimed is
 [`docs/SCIENTIFIC_CLAIMS.md`](docs/SCIENTIFIC_CLAIMS.md).
 
-## VESP-UQ: equivalent-source uncertainty calibration layer
+## VESP-UQ: equivalent-source force-risk / OOD calibration layer
+
+VESP-UQ is a **force-risk / out-of-distribution (OOD) uncertainty-calibration layer** at the
+acceleration interface. It scores a surrogate's expected *force-model* error and OOD risk and
+prioritizes trajectories for selective high-fidelity rerun. It is **not** a position-error
+predictor: it does not predict or improve long-horizon trajectory position error (that is only
+ever used as an external *diagnostic*, see `benchmarks/position_error_diagnostic.md`).
 
 The deterministic entropy/point-estimate experiments showed that maximizing entropy over the
 sources does **not** beat well-regularized ridge on accuracy. The defensible value of the

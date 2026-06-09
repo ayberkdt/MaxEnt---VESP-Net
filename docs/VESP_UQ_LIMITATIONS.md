@@ -29,6 +29,27 @@ VESP-UQ is surrogate-agnostic at the acceleration interface. No ST-LRPS adapter 
 experiment exists in this repository. Do not claim integration unless such an adapter and
 experiment are added and run.
 
+### ST-LRPS diagnostic vs integration
+
+`scripts/analyze_512_orbits.py` *reads* precomputed `ST_LRPS_DT60` position-error metrics to ask a
+single **diagnostic** question — does the VESP-UQ force-risk score happen to co-rank that
+surrogate's long-horizon position error? This is **not** the same as an ST-LRPS integration:
+
+- it consumes a static metrics CSV, it does **not** call or wrap ST-LRPS;
+- VESP-UQ is not inside the ST-LRPS propagator's RHS, and `Sigma_a(x)` is not propagated;
+- a null correlation there is *expected* (position error is often not force-model-error dominated)
+  and is reported as a diagnostic, never as a VESP-UQ failure or a position-error claim.
+
+A real integration (an adapter that feeds `a_corrected`/`Sigma_a(x)` into the ST-LRPS workflow and
+re-runs it) would be a separate, explicitly-tested deliverable; it does not exist yet.
+
+### Local force-error covariance vs orbit/state covariance propagation
+
+VESP-UQ implements the **local** predictive acceleration-error covariance `Sigma_a(x)` (the full
+`3x3` per-point covariance). It does **not** propagate that into a state/orbit covariance through
+an integrator (STM / process-noise / Monte Carlo). The local covariance is implemented; the
+propagation is not, and must not be claimed.
+
 ## Online correction is future work
 
 Adding `a_corrected(x) = a_surrogate(x) + mean_error(x)` inside an integrator's RHS is deferred

@@ -65,7 +65,11 @@ uq:
     domain_distance_weight: 1.0   # weight on the Euclidean k-NN component
     domain_radial_weight: 1.0     # weight on the radial extrapolation component
     domain_angular_weight: 0.0    # optional nearest-direction angular component (off by default)
+    domain_backend: torch         # torch (default) | kdtree (scipy cKDTree; falls back to torch)
   screening:
+    trajectory_source: generated  # generated (Keplerian orbits) | csv (external surrogate output)
+    # trajectory_path: data/my_surrogate_trajectories.csv   # required when trajectory_source: csv
+    # true_error_source: auto      # auto | residual_csv | oracle  (residual_csv needs accel pairs)
     n_orbits: 10000
     n_points: 120
     r_peri_range: [1.03, 1.40]

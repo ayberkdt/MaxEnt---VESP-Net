@@ -44,10 +44,27 @@ It is surrogate-agnostic: it only needs acceleration samples, not the surrogate'
 - Covariance speed modes: `exact`, `diagonal`, `lowrank` (top-k eigenpairs of the posterior
   covariance). Indicative cost for 4000 query points × 1280 sources: exact ≈ 600 ms,
   diagonal ≈ 230 ms (~2.6× faster), lowrank ≈ 260 ms.
-- Trajectory scoring (`max`, `mean`, `low_alt_integral`, `time_above`, `combined`) and selective
-  rerun with capture-rate / precision / Spearman validation against a held-out ground-truth oracle.
+- Trajectory scoring in three families: legacy **sigma** (`max`, `mean`, `low_alt_integral`,
+  `time_above`, `combined`); **expected-force-error** (`expected_abs`(+`_p95`), `expected_low_alt`);
+  and **supervisor** point risk = expected error x altitude weight x (1 + domain risk), in a
+  *relative* form (`supervisor_rel`(+`_p95`), per-trajectory altitude normalization — for ranking)
+  and an *absolute* form (`supervisor_abs`(+`_p95`), fixed altitude reference — for physical
+  budgets / zero-alarm thresholds). `expected`/`supervisor`(+`_p95`) are backward-compatible aliases.
+- Domain-support / OOD scoring (k-NN distance + radial + optional angular components).
+- Selective rerun with three policies (top-fraction top-k, absolute threshold, threshold+cap) and
+  capture-rate / precision / Spearman validation against a held-out ground-truth oracle.
+- **External trajectory ingestion** (`vesp.uq.io.load_trajectory_csv`): score surrogate-generated
+  ensembles from CSV (positions-only, or with surrogate/reference acceleration pairs for direct
+  residual-force-error fitting/scoring).
 - CSV artifacts: `calibration_by_band.csv`, `trajectory_scores.csv`, `flagged_trajectories.csv`,
   `fit_summary.json`; JSON + Markdown reports with an IAC claim summary.
+
+**Force-risk / OOD vs position-error diagnostic.** The core deliverable is *force-model risk /
+OOD detection* — does the score flag low-altitude/OOD passes and rank the surrogate's true
+*force* error (`scripts/run_force_error_benchmark.py`)? Whether the force-risk score happens to
+co-rank a surrogate's long-horizon *position* error (`scripts/analyze_512_orbits.py`) is a
+separate **diagnostic**, not a VESP-UQ claim; a null result there is expected when position error
+is not force-model-error dominated.
 
 ## What is not implemented (future work)
 
