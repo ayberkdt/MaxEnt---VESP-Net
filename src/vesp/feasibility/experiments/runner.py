@@ -9,7 +9,7 @@ An experiment file is a YAML mapping with:
     ``name`` (required), ``kind`` (``single`` | ``sweep``, optional/informational)
     and a free-text ``description`` / ``question`` for the report.
 ``base_config``
-    A full VESP config (the same schema consumed by ``vesp.training.train``). It is
+    A full VESP config (the same schema consumed by ``vesp.feasibility.training.train``). It is
     merged onto the package defaults before every trial.
 ``sweep`` (optional)
     Either:
@@ -23,7 +23,7 @@ An experiment file is a YAML mapping with:
 If ``sweep`` is absent the experiment is a single run of ``base_config``.
 
 This module is deliberately thin: each trial is handed to
-``vesp.training.train_discrete.run`` which already performs the solve, evaluation,
+``vesp.feasibility.training.train_discrete.run`` which already performs the solve, evaluation,
 diagnostics, acceptability screening and per-run artifact writing.
 """
 
@@ -41,7 +41,7 @@ import yaml
 
 from vesp.common.config import merge_defaults
 from vesp.core.models import MultiShellDiscreteVESP
-from vesp.training.train_discrete import run
+from vesp.feasibility.training.train_discrete import run
 
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -229,7 +229,7 @@ def run_experiment(
 
     # Imported here to avoid a circular import (summarize imports nothing heavy, but
     # keeping the dependency one-directional makes the package easier to reason about).
-    from vesp.experiments.summarize import summary_row
+    from vesp.feasibility.experiments.summarize import summary_row
 
     output_root = Path(output_root)
     output_root.mkdir(parents=True, exist_ok=True)

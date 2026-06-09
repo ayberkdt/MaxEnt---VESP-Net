@@ -12,7 +12,7 @@ and reports the per-metric winner. The verdict is computed from the data, not ha
 
 from __future__ import annotations
 
-from vesp.experiments.summarize import _to_float
+from vesp.feasibility.experiments.summarize import _to_float
 
 ERROR_KEY = "relative_acceleration_rmse"
 

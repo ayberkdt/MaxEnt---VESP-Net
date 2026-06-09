@@ -81,12 +81,12 @@ CONFIG_PRESETS = {
 }
 
 try:
-    from vesp.analysis.analysis import interpret_experiment, load_checkpoint_summary, make_markdown_report, write_markdown_report
-    from vesp.analysis.advanced_analysis import make_advanced_report, write_analysis_pdf
+    from vesp.feasibility.analysis.analysis import interpret_experiment, load_checkpoint_summary, make_markdown_report, write_markdown_report
+    from vesp.feasibility.analysis.advanced_analysis import make_advanced_report, write_analysis_pdf
 except ImportError:
     sys.path.insert(0, str(PROJECT_ROOT / "src"))
-    from vesp.analysis.analysis import interpret_experiment, load_checkpoint_summary, make_markdown_report, write_markdown_report
-    from vesp.analysis.advanced_analysis import make_advanced_report, write_analysis_pdf
+    from vesp.feasibility.analysis.analysis import interpret_experiment, load_checkpoint_summary, make_markdown_report, write_markdown_report
+    from vesp.feasibility.analysis.advanced_analysis import make_advanced_report, write_analysis_pdf
 
 
 class VespWorkbench(QMainWindow):
@@ -922,7 +922,7 @@ class VespWorkbench(QMainWindow):
         if self._is_experiment_config(cfg):
             self._run_experiment_config()
             return
-        module = "vesp.training.feasibility" if self._is_feasibility_config(cfg) else "vesp.training.train"
+        module = "vesp.feasibility.training.feasibility" if self._is_feasibility_config(cfg) else "vesp.feasibility.training.train"
         self._run_training(module)
 
     def _start_process(self, arguments: list[str], *, banner: str, save_config: bool = True) -> bool:

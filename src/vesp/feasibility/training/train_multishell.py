@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Iterable
 
-from vesp.training.train import main as unified_main
+from vesp.feasibility.training.train import main as unified_main
 
 
 def main(argv: Iterable[str] | None = None) -> None:

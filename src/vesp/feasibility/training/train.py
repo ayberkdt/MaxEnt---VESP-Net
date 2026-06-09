@@ -7,7 +7,7 @@ from typing import Iterable
 
 from vesp.common.config import load_config
 from vesp.core.models import MultiShellDiscreteVESP
-from vesp.training.train_discrete import run
+from vesp.feasibility.training.train_discrete import run
 
 
 def run_from_config(config: dict) -> dict:

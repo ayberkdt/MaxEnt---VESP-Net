@@ -19,10 +19,10 @@ import pandas as pd
 import torch
 from torch.utils.data import DataLoader
 
-from vesp.analysis.analysis import load_checkpoint_summary, make_markdown_report
+from vesp.feasibility.analysis.analysis import load_checkpoint_summary, make_markdown_report
 from vesp.data.dataset import ResidualGravityDataset
 from vesp.core.models import load_checkpoint
-from vesp.training.train_discrete import make_data
+from vesp.feasibility.training.train_discrete import make_data
 
 
 PDF_SCHEMA_VERSION = "vesp_analysis_pdf_v1"

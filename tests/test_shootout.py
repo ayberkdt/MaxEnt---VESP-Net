@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from vesp.experiments.runner import expand_trials, load_experiment_config
-from vesp.experiments.shootout import shootout_report
+from vesp.feasibility.experiments.runner import expand_trials, load_experiment_config
+from vesp.feasibility.experiments.shootout import shootout_report
 
 ROOT = Path(__file__).resolve().parents[1]
 

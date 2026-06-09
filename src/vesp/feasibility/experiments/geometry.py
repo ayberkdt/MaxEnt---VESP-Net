@@ -13,7 +13,7 @@ not a confound.
 
 from __future__ import annotations
 
-from vesp.experiments.summarize import _to_float
+from vesp.feasibility.experiments.summarize import _to_float
 
 # Primary ranking key: held-out OOD low-altitude error if present, else the val low band.
 PRIMARY_KEY = "test_low_acceleration_rmse"

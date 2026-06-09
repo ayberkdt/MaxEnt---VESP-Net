@@ -1,4 +1,4 @@
-"""Tests for the experiment-first framework (vesp.experiments).
+"""Tests for the experiment-first framework (vesp.feasibility.experiments).
 
 These are CI-friendly: they exercise the runner / summarizer on the small synthetic
 experiment configs only. No real-lunar data is loaded or downloaded.
@@ -13,17 +13,17 @@ import pytest
 
 from vesp.common.config import merge_defaults
 from vesp.core.models import MultiShellDiscreteVESP
-from vesp.experiments.registry import CORE_EXPERIMENTS
-from vesp.experiments.runner import (
+from vesp.feasibility.experiments.registry import CORE_EXPERIMENTS
+from vesp.feasibility.experiments.runner import (
     Trial,
     expand_trials,
     git_commit_hash,
     load_experiment_config,
     run_experiment,
 )
-from vesp.experiments.suites import SUITES, resolve_suite
-from vesp.experiments.summarize import SUMMARY_COLUMNS, summary_row, write_suite_artifacts
-from vesp.training.train_discrete import run
+from vesp.feasibility.experiments.suites import SUITES, resolve_suite
+from vesp.feasibility.experiments.summarize import SUMMARY_COLUMNS, summary_row, write_suite_artifacts
+from vesp.feasibility.training.train_discrete import run
 
 ROOT = Path(__file__).resolve().parents[1]
 EXP_DIR = ROOT / "configs" / "experiments"
@@ -184,7 +184,7 @@ def test_constrained_maxent_respects_misfit_and_does_not_lower_entropy():
 
     from vesp.core.solvers import RidgeSolveConfig, solve_discrete_ridge
     from vesp.extensions.entropy import effective_source_entropy
-    from vesp.training.maxent import MaxEntSolveConfig, solve_discrete_maxent_constrained
+    from vesp.feasibility.training.maxent import MaxEntSolveConfig, solve_discrete_maxent_constrained
 
     torch.manual_seed(0)
     # underdetermined system -> a null space exists for entropy to exploit

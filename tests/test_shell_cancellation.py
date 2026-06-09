@@ -15,7 +15,7 @@ from vesp.core.operators import build_joint_operator
 from vesp.core.solvers import RidgeSolveConfig, solve_discrete_ridge
 from vesp.core.sources import make_shell_sources
 from vesp.data.dataset import ResidualGravityData
-from vesp.training.evaluate import evaluate_model
+from vesp.feasibility.training.evaluate import evaluate_model
 
 
 def _data_and_sources():

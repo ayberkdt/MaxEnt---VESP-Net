@@ -34,10 +34,10 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT / "src") not in sys.path:
     sys.path.insert(0, str(ROOT / "src"))
 
-from vesp.experiments.registry import experiment_info
-from vesp.experiments.runner import git_commit_hash, load_experiment_config, run_experiment
-from vesp.experiments.suites import resolve_suite
-from vesp.experiments.summarize import write_suite_artifacts
+from vesp.feasibility.experiments.registry import experiment_info
+from vesp.feasibility.experiments.runner import git_commit_hash, load_experiment_config, run_experiment
+from vesp.feasibility.experiments.suites import resolve_suite
+from vesp.feasibility.experiments.summarize import write_suite_artifacts
 
 
 def _resolve_config_paths(args: argparse.Namespace) -> tuple[str, list[Path]]:

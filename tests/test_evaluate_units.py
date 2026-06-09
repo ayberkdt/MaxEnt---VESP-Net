@@ -5,7 +5,7 @@ import pytest
 import torch
 
 from vesp.core.sources import make_shell_sources
-from vesp.training import evaluate
+from vesp.feasibility.training import evaluate
 
 
 def _write_csv(path: Path, *, with_metadata: bool = True) -> Path:

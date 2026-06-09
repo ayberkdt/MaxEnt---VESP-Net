@@ -25,13 +25,13 @@ if str(ROOT / "src") not in sys.path:
     sys.path.insert(0, str(ROOT / "src"))
 
 from vesp.common.config import merge_defaults
-from vesp.experiments.geometry import _find_baseline, geometry_report
-from vesp.experiments.runner import _set_nested, git_commit_hash, load_experiment_config, run_experiment
-from vesp.experiments.summarize import write_suite_artifacts
+from vesp.feasibility.experiments.geometry import _find_baseline, geometry_report
+from vesp.feasibility.experiments.runner import _set_nested, git_commit_hash, load_experiment_config, run_experiment
+from vesp.feasibility.experiments.summarize import write_suite_artifacts
 
 
 def _write_ranking_csv(path: Path, ranking: list[dict]) -> None:
-    from vesp.experiments.geometry import REPORT_COLUMNS
+    from vesp.feasibility.experiments.geometry import REPORT_COLUMNS
 
     with path.open("w", encoding="utf-8", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=REPORT_COLUMNS, extrasaction="ignore")
@@ -48,7 +48,7 @@ def _overrides_by_name(experiment_cfg: dict) -> dict[str, dict]:
 
 
 def _calibration_for(experiment_cfg: dict, name: str, overrides: dict, out_dir: Path) -> dict | None:
-    from vesp.training.uncertainty import run_uncertainty_eval
+    from vesp.feasibility.training.uncertainty import run_uncertainty_eval
 
     cfg = merge_defaults(deepcopy(experiment_cfg["base_config"]))
     for dotted, value in overrides.items():

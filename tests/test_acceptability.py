@@ -1,4 +1,4 @@
-from vesp.training.acceptability import (
+from vesp.feasibility.training.acceptability import (
     STATUS_GOOD,
     STATUS_REJECT_LOW_ALTITUDE,
     STATUS_REJECT_REGULARIZATION,

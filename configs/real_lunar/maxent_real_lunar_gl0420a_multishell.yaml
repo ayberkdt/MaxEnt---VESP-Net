@@ -1,5 +1,5 @@
 # Stage 3A: single deterministic MaxEnt run on the real lunar multi-shell case.
-#   python -m vesp.training.train --config configs/real_lunar/maxent_real_lunar_gl0420a_multishell.yaml
+#   python -m vesp.feasibility.training.train --config configs/real_lunar/maxent_real_lunar_gl0420a_multishell.yaml
 #
 # This keeps the ridge solution as a warm start / baseline and adds a maximum-entropy
 # term over the source strengths. entropy_mode=shell_balance maximizes the entropy of
@@ -8,7 +8,7 @@
 #
 # IMPORTANT: the entropy_weight below is a single operating point. The principled way
 # to choose it is the data-error vs entropy Pareto sweep:
-#   python -m vesp.training.maxent_pareto --config configs/real_lunar/maxent_pareto_real_lunar.yaml
+#   python -m vesp.feasibility.training.maxent_pareto --config configs/real_lunar/maxent_pareto_real_lunar.yaml
 #
 # L2 CONSISTENCY (fixed): lambda_l2 is the CONSERVATIVE BASELINE value 30.0, matching the
 # ridge default (configs/real_lunar/real_lunar_gl0420a_multishell.yaml). Earlier revisions of this

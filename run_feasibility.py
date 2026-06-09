@@ -1,4 +1,4 @@
-"""DEPRECATED convenience wrapper for ``vesp.training.feasibility``.
+"""DEPRECATED convenience wrapper for ``vesp.feasibility.training.feasibility``.
 
 Superseded by the experiment framework. Prefer:
     python scripts/run_experiment_suite.py --suite synthetic
@@ -7,7 +7,7 @@ Superseded by the experiment framework. Prefer:
 Still works (deprecate-and-delegate); the underlying runner prints a deprecation banner.
 """
 
-from vesp.training.feasibility import main
+from vesp.feasibility.training.feasibility import main
 
 
 if __name__ == "__main__":

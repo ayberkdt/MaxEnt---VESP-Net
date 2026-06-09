@@ -28,7 +28,7 @@ from vesp.common.config import get_device, get_dtype, load_config, merge_default
 from vesp.core.operators import build_joint_operator
 from vesp.core.sources import SourceSet
 from vesp.extensions.probabilistic import AltitudeNoiseModel, LinearGaussianPosterior, calibration_metrics
-from vesp.training.train_discrete import make_data_splits, make_model
+from vesp.feasibility.training.train_discrete import make_data_splits, make_model
 
 
 def _acceleration_system(positions, acceleration, model, kernel_cfg) -> tuple[torch.Tensor, torch.Tensor]:

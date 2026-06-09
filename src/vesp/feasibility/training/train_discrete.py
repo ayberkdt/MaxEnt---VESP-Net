@@ -13,14 +13,14 @@ from torch.utils.data import DataLoader
 
 from vesp.common.config import get_device, get_dtype, load_config as load_standard_config, merge_defaults, validate_config
 from vesp.data.dataset import ResidualGravityDataset, load_csv_dataset
-from vesp.training.acceptability import classify_run_acceptability
-from vesp.training.evaluate import evaluate_model, print_metrics, write_evaluation_artifacts
+from vesp.feasibility.training.acceptability import classify_run_acceptability
+from vesp.feasibility.training.evaluate import evaluate_model, print_metrics, write_evaluation_artifacts
 from vesp.core.losses import composite_loss
 from vesp.core.models import DiscreteVESP, save_checkpoint
 from vesp.core.operators import build_joint_operator
 from vesp.core.regularization import lambda_is_auto, select_lambda_l2
 from vesp.core.solvers import RidgeSolveConfig, solve_discrete_ridge
-from vesp.training.maxent import MaxEntSolveConfig, solve_discrete_maxent, solve_discrete_maxent_constrained
+from vesp.feasibility.training.maxent import MaxEntSolveConfig, solve_discrete_maxent, solve_discrete_maxent_constrained
 from vesp.extensions.entropy import (
     effective_source_entropy,
     positive_negative_entropy,

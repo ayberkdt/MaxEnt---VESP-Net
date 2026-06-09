@@ -12,7 +12,7 @@ from typing import Iterable
 import yaml
 
 from vesp.core.models import MultiShellDiscreteVESP
-from vesp.training.train_discrete import run
+from vesp.feasibility.training.train_discrete import run
 
 
 def _base_config() -> dict:
@@ -404,7 +404,7 @@ def main(argv: Iterable[str] | None = None) -> None:
     from vesp.common.deprecation import warn_superseded
 
     warn_superseded(
-        "vesp.training.feasibility",
+        "vesp.feasibility.training.feasibility",
         "python scripts/run_experiment_suite.py --suite synthetic  (E0-E4) "
         "or --experiment E0",
     )

@@ -1,6 +1,6 @@
 """Shared deprecation helper for superseded entry points.
 
-The experiment-first framework (``vesp.experiments`` /
+The experiment-first framework (``vesp.feasibility.experiments`` /
 ``scripts/run_experiment_suite.py``) supersedes the older one-off orchestration
 runners (``run_ablation``, ``maxent_pareto``, ``feasibility``, the ``stage*`` shims).
 Those runners still work — they are *deprecated, not removed* — so existing commands

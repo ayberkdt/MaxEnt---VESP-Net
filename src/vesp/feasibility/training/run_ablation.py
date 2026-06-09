@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import Iterable
 
 from vesp.core.models import MultiShellDiscreteVESP
-from vesp.training.train_discrete import load_config, run
+from vesp.feasibility.training.train_discrete import load_config, run
 
 
 def _set_nested(config: dict, path: str, value) -> None:
@@ -368,7 +368,7 @@ def main(argv: Iterable[str] | None = None) -> None:
     from vesp.common.deprecation import warn_superseded
 
     warn_superseded(
-        "vesp.training.run_ablation",
+        "vesp.feasibility.training.run_ablation",
         "python scripts/run_experiment_suite.py --experiment E3  (L2 sweep) "
         "or --config configs/experiments/<name>.yaml",
     )

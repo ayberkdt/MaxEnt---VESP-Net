@@ -1,5 +1,5 @@
 # Stage 3C — calibrated posterior uncertainty over equivalent sources (OOD altitude).
-#   python -m vesp.training.uncertainty --config configs/uncertainty/uncertainty_synthetic_ood.yaml
+#   python -m vesp.feasibility.training.uncertainty --config configs/uncertainty/uncertainty_synthetic_ood.yaml
 #
 # Noisy synthetic residual field, multi-shell sources, altitude-OOD split. Fits the exact
 # linear-Gaussian posterior (mean == ridge) and validates the predictive error bars:

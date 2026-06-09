@@ -41,17 +41,17 @@ def _base_commands() -> list[list[str]]:
         # E8: source-geometry shootout (is the low-altitude bottleneck geometry?), ranked verdict.
         [py, "scripts/geometry_shootout.py", "--config", "configs/experiments/synthetic_geometry_shootout.yaml", "--quick", "--no-plots"],
         # Stage 3C: calibrated posterior uncertainty (MaxEnt-as-uncertainty) calibration check.
-        [py, "-m", "vesp.training.uncertainty", "--config", "configs/uncertainty/uncertainty_synthetic_ood.yaml"],
+        [py, "-m", "vesp.feasibility.training.uncertainty", "--config", "configs/uncertainty/uncertainty_synthetic_ood.yaml"],
     ]
 
 
 def _legacy_commands() -> list[list[str]]:
     py = sys.executable
     return [
-        [py, "-m", "vesp.training.train", "--config", "configs/feasibility/discrete_single_shell.yaml"],
-        [py, "-m", "vesp.training.train", "--config", "configs/feasibility/discrete_multishell.yaml"],
-        [py, "-m", "vesp.training.train", "--config", "configs/feasibility/altitude_ood.yaml"],
-        [py, "-m", "vesp.training.feasibility", "--config", "configs/feasibility/feasibility_suite.yaml"],
+        [py, "-m", "vesp.feasibility.training.train", "--config", "configs/feasibility/discrete_single_shell.yaml"],
+        [py, "-m", "vesp.feasibility.training.train", "--config", "configs/feasibility/discrete_multishell.yaml"],
+        [py, "-m", "vesp.feasibility.training.train", "--config", "configs/feasibility/altitude_ood.yaml"],
+        [py, "-m", "vesp.feasibility.training.feasibility", "--config", "configs/feasibility/feasibility_suite.yaml"],
     ]
 
 
@@ -60,7 +60,7 @@ def _real_lunar_commands() -> list[list[str]]:
     return [
         [py, "scripts/run_experiment_suite.py", "--suite", "real_lunar", "--quick"],
         # Stage 3C+ heteroscedastic per-band calibration on real lunar (in-distribution).
-        [py, "-m", "vesp.training.uncertainty", "--config", "configs/uncertainty/uncertainty_real_lunar.yaml"],
+        [py, "-m", "vesp.feasibility.training.uncertainty", "--config", "configs/uncertainty/uncertainty_real_lunar.yaml"],
     ]
 
 

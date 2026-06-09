@@ -23,8 +23,8 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT / "src") not in sys.path:
     sys.path.insert(0, str(ROOT / "src"))
 
-from vesp.experiments.runner import git_commit_hash
-from vesp.experiments.summarize import summary_row, write_suite_artifacts
+from vesp.feasibility.experiments.runner import git_commit_hash
+from vesp.feasibility.experiments.summarize import summary_row, write_suite_artifacts
 
 
 def _load_run(run_dir: Path) -> dict | None:

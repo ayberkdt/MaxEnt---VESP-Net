@@ -19,9 +19,9 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT / "src") not in sys.path:
     sys.path.insert(0, str(ROOT / "src"))
 
-from vesp.experiments.runner import git_commit_hash, load_experiment_config, run_experiment
-from vesp.experiments.shootout import shootout_report
-from vesp.experiments.summarize import write_suite_artifacts
+from vesp.feasibility.experiments.runner import git_commit_hash, load_experiment_config, run_experiment
+from vesp.feasibility.experiments.shootout import shootout_report
+from vesp.feasibility.experiments.summarize import write_suite_artifacts
 
 
 def _write_matched_csv(path: Path, matched: list[dict]) -> None:

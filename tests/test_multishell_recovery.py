@@ -1,5 +1,5 @@
 
-from vesp.training.train import run_from_config
+from vesp.feasibility.training.train import run_from_config
 
 
 def _cfg(model, output_dir="outputs/test_multishell"):

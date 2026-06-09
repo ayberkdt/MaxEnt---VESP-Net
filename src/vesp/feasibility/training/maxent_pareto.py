@@ -23,7 +23,7 @@ import yaml
 
 from vesp.common.config import merge_defaults
 from vesp.core.models import MultiShellDiscreteVESP
-from vesp.training.train_discrete import run
+from vesp.feasibility.training.train_discrete import run
 
 
 FIELDNAMES = [
@@ -206,7 +206,7 @@ def main(argv: Iterable[str] | None = None) -> None:
     from vesp.common.deprecation import warn_superseded
 
     warn_superseded(
-        "vesp.training.maxent_pareto",
+        "vesp.feasibility.training.maxent_pareto",
         "python scripts/run_experiment_suite.py --experiment E4  (synthetic entropy Pareto) "
         "or --config configs/experiments/real_lunar_entropy_pareto.yaml",
     )

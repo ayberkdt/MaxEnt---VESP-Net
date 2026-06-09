@@ -1,5 +1,5 @@
 # STRESS TEST (intentionally under-regularized) — NOT a default / production config.
-#   python -m vesp.training.maxent_pareto --config configs/real_lunar/maxent_pareto_real_lunar_lowl2_stress_test.yaml
+#   python -m vesp.feasibility.training.maxent_pareto --config configs/real_lunar/maxent_pareto_real_lunar_lowl2_stress_test.yaml
 #
 # This preserves the previous behavior of maxent_pareto_real_lunar.yaml, which used a
 # known under-regularized lambda_l2 = 1e-5. At that L2 the deterministic ridge baseline

@@ -10,8 +10,8 @@ from vesp.core.kernels import evaluate_kernel
 from vesp.core.models import DiscreteVESP
 from vesp.core.sources import make_shell_sources
 from vesp.data.dataset import ResidualGravityData, split_data
-from vesp.training.evaluate import evaluate_model
-from vesp.training.train_discrete import solve_ridge
+from vesp.feasibility.training.evaluate import evaluate_model
+from vesp.feasibility.training.train_discrete import solve_ridge
 
 
 def main() -> None:

@@ -7,7 +7,7 @@ experiments* so the core scientific question can actually be tested:
     ridge / Tikhonov equivalent-source fit?
 
 It does not implement any new physics or solver. It is pure orchestration on top of
-``vesp.training.train_discrete.run``:
+``vesp.feasibility.training.train_discrete.run``:
 
 - ``runner``    — load an experiment YAML, expand it into trials, run each trial and
                   collect its metrics + diagnostics.
@@ -24,20 +24,20 @@ to claim.
 
 from __future__ import annotations
 
-from vesp.experiments.registry import CORE_EXPERIMENTS, ExperimentInfo, experiment_info
-from vesp.experiments.runner import (
+from vesp.feasibility.experiments.registry import CORE_EXPERIMENTS, ExperimentInfo, experiment_info
+from vesp.feasibility.experiments.runner import (
     Trial,
     expand_trials,
     git_commit_hash,
     load_experiment_config,
     run_experiment,
 )
-from vesp.experiments.summarize import (
+from vesp.feasibility.experiments.summarize import (
     SUMMARY_COLUMNS,
     summary_row,
     write_suite_artifacts,
 )
-from vesp.experiments.suites import SUITES, resolve_suite
+from vesp.feasibility.experiments.suites import SUITES, resolve_suite
 
 __all__ = [
     "CORE_EXPERIMENTS",

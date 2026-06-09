@@ -1,4 +1,4 @@
-from vesp.training.run_ablation import _trial_configs
+from vesp.feasibility.training.run_ablation import _trial_configs
 
 
 def _base():

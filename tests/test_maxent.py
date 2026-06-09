@@ -5,7 +5,7 @@ from vesp.core.kernels import evaluate_kernel
 from vesp.core.operators import build_joint_operator
 from vesp.core.solvers import RidgeSolveConfig, solve_discrete_ridge
 from vesp.extensions.entropy import shell_energy_balance_entropy
-from vesp.training.maxent import MaxEntSolveConfig, solve_discrete_maxent
+from vesp.feasibility.training.maxent import MaxEntSolveConfig, solve_discrete_maxent
 
 
 def _collapse_prone_system():

@@ -5,7 +5,7 @@ import torch
 
 from vesp.common.config import merge_defaults
 from vesp.data.target_scaling import compute_target_scales
-from vesp.training.train_discrete import make_data_splits, run
+from vesp.feasibility.training.train_discrete import make_data_splits, run
 
 
 def _small_config(tmp_path, *, normalize_targets: bool) -> dict:

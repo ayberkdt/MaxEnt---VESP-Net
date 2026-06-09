@@ -8,7 +8,7 @@ import torch
 
 from vesp.common.config import load_config
 from vesp.extensions.probabilistic import AltitudeNoiseModel, LinearGaussianPosterior, calibration_metrics
-from vesp.training.uncertainty import run_uncertainty_eval
+from vesp.feasibility.training.uncertainty import run_uncertainty_eval
 
 ROOT = Path(__file__).resolve().parents[1]
 
