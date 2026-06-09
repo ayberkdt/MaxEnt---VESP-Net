@@ -24,7 +24,7 @@ per-point sample mean/covariance match :meth:`VESPUQPlugin.predict_uncertainty` 
 from __future__ import annotations
 
 import time
-from typing import Callable
+from collections.abc import Callable
 
 import numpy as np
 import torch
@@ -59,13 +59,13 @@ def draw_posterior_samples(
     plugin: VESPUQPlugin, n_samples: int, seed: int = 42
 ) -> torch.Tensor:
     """Draw `n_samples` of source strengths (sigma) from the VESP-UQ posterior.
-    
+
     Returns:
         sigma_samples: Tensor of shape [n_samples, n_sources]
     """
     if plugin.posterior is None:
         raise RuntimeError("Plugin must be fitted before drawing samples.")
-        
+
     mean = plugin.posterior.mean
     cov = plugin.posterior.cov
 
@@ -78,18 +78,18 @@ def draw_posterior_samples(
 
     # Z ~ N(0, I)
     Z = torch.randn(n_samples, mean.shape[0], device=mean.device, dtype=mean.dtype, generator=generator)
-    
+
     # samples = mean + L @ Z
     # Z is [N_samples, n_sources], L is [n_sources, n_sources]
     samples = mean.unsqueeze(0) + (L @ Z.unsqueeze(-1)).squeeze(-1)
-    
+
     return samples
 
 
 class VESPMonteCarloPropagator:
     """
     Batched RK4 Monte Carlo propagator for VESP-UQ error fields.
-    
+
     Integrates N parallel trajectories where each trajectory is perturbed
     by a different sample from the VESP-UQ posterior.
     """
@@ -112,10 +112,10 @@ class VESPMonteCarloPropagator:
         self.device = torch.device(device)
         self.dtype = dtype
         self.base_accel_fn = base_accel_fn
-        
+
         # 1. Draw MC samples of the force error
         self.sigma_samples = draw_posterior_samples(plugin, n_samples, seed=seed).to(dtype=self.dtype, device=self.device)
-        
+
         # 2. Extract source configuration
         self.source_positions = plugin.sources.positions.to(dtype=self.dtype, device=self.device)
         self.source_weights = plugin.sources.weights.to(dtype=self.dtype, device=self.device)
@@ -132,7 +132,7 @@ class VESPMonteCarloPropagator:
         """Evaluate [v; a] for a state batch [N, 6]."""
         r = s[:, :3]  # [N, 3]
         v = s[:, 3:]  # [N, 3]
-        
+
         # Base acceleration (either ST-LRPS or point mass)
         if self.base_accel_fn is not None:
             a_central = self.base_accel_fn(r)
@@ -140,17 +140,17 @@ class VESPMonteCarloPropagator:
             r2 = torch.sum(r * r, dim=1, keepdim=True)
             r_mag3 = r2 * torch.sqrt(r2)
             a_central = -self.mu * r / r_mag3
-        
+
         # VESP-UQ Error Evaluation
         # Kernel: [N, n_sources, 3] -- sign/eps match the fitted operator (weights applied below).
         ker = acceleration_kernel(r, self.source_positions, eps=self.eps, sign=self.accel_sign)
 
         # Multiply by weighted sigma samples [N, n_sources] and sum over sources
         a_error = (ker * self.weighted_samples.unsqueeze(-1)).sum(dim=1)
-        
+
         # Total acceleration
         a_total = a_central + a_error
-        
+
         return torch.cat([v, a_total], dim=1)
 
     def _rk4_step(self, s: torch.Tensor, h: float) -> torch.Tensor:
@@ -168,14 +168,14 @@ class VESPMonteCarloPropagator:
     ) -> tuple[np.ndarray, np.ndarray]:
         """
         Propagate the initial state subject to N different error realizations.
-        
+
         Returns:
             t_out: (T,) array of time points
             Y_out: (T, N_samples, 6) array of propagated states
         """
         if y0.shape != (6,):
             raise ValueError("y0 must be a 1D array of shape (6,)")
-            
+
         N = self.n_samples
         snap_interval = float(output_dt_s)
         total_time = float(duration_s)

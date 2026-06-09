@@ -6,6 +6,23 @@ on:
   pull_request:
 
 jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install ruff
+        run: python -m pip install ruff==0.15.16
+
+      - name: Ruff lint (VESP-UQ surface + scripts + tests)
+        # N2: lint-only gate (see pyproject [tool.ruff]). The formatter is intentionally not gated.
+        run: ruff check src/vesp/uq scripts tests
+
   test:
     runs-on: ubuntu-latest
     steps:
@@ -35,3 +52,4 @@ jobs:
           python scripts/compare_risk_baselines.py --config configs/vespuq/vespuq_smoke.yaml
           python scripts/run_calibration_audit.py --config configs/vespuq/vespuq_smoke.yaml
           python scripts/run_physical_budget_screening.py --config configs/vespuq/vespuq_smoke.yaml --budget 1e-8 --units m/s^2 --scoring expected_abs_p95
+          python scripts/run_linear_propagation.py --config configs/vespuq/vespuq_smoke.yaml --duration 7.0

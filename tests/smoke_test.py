@@ -1,16 +1,16 @@
-from pathlib import Path
 import sys
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 import torch
 
+from vesp.core.kernels import evaluate_kernel
+from vesp.core.models import DiscreteVESP
+from vesp.core.sources import make_shell_sources
 from vesp.data.dataset import ResidualGravityData, split_data
 from vesp.training.evaluate import evaluate_model
-from vesp.core.kernels import evaluate_kernel
-from vesp.core.sources import make_shell_sources
-from vesp.core.models import DiscreteVESP
 from vesp.training.train_discrete import solve_ridge
 
 

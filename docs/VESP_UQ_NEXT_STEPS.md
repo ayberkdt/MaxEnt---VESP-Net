@@ -62,31 +62,43 @@ Open gaps found while surveying the code (evidence in parentheses):
   main `vesp.uq.run`. Output filenames preserved. Tests in `tests/test_uq_run_artifacts.py` assert
   the manifest exists and its checksums match the files on disk (369 tests pass).
 
-### N2 — Code quality: lint + format check in CI (MEDIUM-HIGH)
+### N2 — Code quality: lint + format check in CI — **DONE**
 
-- **Why:** stated "code quality" goal; no static analysis exists today (a stray placeholder import
+- **Why:** stated "code quality" goal; no static analysis existed (a stray placeholder import
   slipped in during recent work and was only caught by hand).
-- **Action:** add a `ruff` config to `pyproject.toml` (lint + import hygiene + format check) scoped
-  to `src/vesp/uq`, `scripts/`, `tests/`; add a CI lint job. Optionally add `mypy` on
-  `src/vesp/uq` only (it is the most type-annotated area) as non-blocking to start.
-- **Acceptance:** `ruff check` clean on the uq surface; CI runs it; no behavior change.
-- **Effort:** S–M. **Risk:** low (may surface pre-existing lint to fix or ignore explicitly).
+- **Done:** added a `ruff` config to `pyproject.toml` (`select = E, F, I, W, B, UP`,
+  `line-length 120`, `target-version py310`; `E402` ignored in `scripts/`+`tests/` for the
+  sys.path-before-import pattern; `E501` left to the formatter). The gate is **lint-only** by
+  deliberate scope choice — a `[tool.ruff.format]` section is present for local use but the formatter
+  is intentionally **not** CI-gated, so this stays behavior-preserving rather than a ~1.5k-line mass
+  reformat. Added a dedicated `lint` job to `.github/workflows/ci.yml`
+  (`ruff check src/vesp/uq scripts tests`) and pinned `ruff==0.15.16` in the `dev` extra. Fixed the
+  surfaced issues (autofixed import order/whitespace/unused imports + manual unused-variable,
+  `zip(..., strict=True)`, and loop-closure binding fixes); `ruff check` is clean on the uq surface
+  and all three scoped dirs, and the suite still passes (372 tests). `mypy` was left out (optional in
+  the plan; can be added non-blocking later).
 
-### N3 — Propagation consolidation: driver + benchmark doc (MEDIUM)
+### N3 — Propagation consolidation: driver + benchmark doc — **DONE**
 
-- **Why:** the linearized STM covariance (`vesp.uq.linear_propagation`) has no driver script or doc,
-  and there is no documented MC-vs-STM comparison even though a test already shows they agree in the
-  linear regime.
-- **Action:**
-  - add `scripts/run_linear_propagation.py` (parity with `run_propagation.py`): writes nominal
-    states, `6x6` covariances, and position/velocity sigma, through the N1 artifact layer;
-  - add `benchmarks/covariance_propagation.md`: MC vs STM agreement, cost trade-off (STM is
-    deterministic / sampling-free; MC scales with sample count), and the **exploratory, not
-    validated** framing + the force-risk⊥position-error caveat;
-  - add the two propagation rows to `benchmarks/README.md`.
-- **Acceptance:** script runs on the smoke config and writes artifacts; doc states the honest scope;
-  CI smoke covers the new script.
-- **Effort:** M. **Risk:** low.
+- **Why:** the linearized STM covariance (`vesp.uq.linear_propagation`) had no driver script or doc,
+  and there was no documented MC-vs-STM comparison even though a test already showed they agree in
+  the linear regime.
+- **Done:**
+  - added `scripts/run_linear_propagation.py` (parity with `run_propagation.py`): fits from a config,
+    propagates a low circular orbit, and writes nominal states, `6x6` covariances, and
+    position/velocity sigma through the N1 artifact layer (`linear_propagation.{json,md}` +
+    `linear_propagation_states.csv` + `run_manifest.json`); params come from an optional
+    `uq.propagation` config block overridable by CLI flags;
+  - added `benchmarks/covariance_propagation.md`: MC-vs-STM agreement (converges to **0.008%** at
+    `N = 8000` in the drift regime) and the cost trade-off (STM deterministic / sampling-free, ~70x
+    faster; MC scales with sample count and carries `O(1/sqrt(N))` noise), with the **exploratory,
+    not validated** framing + the force-risk⊥position-error caveat;
+  - added the two propagation rows + reproduce commands to `benchmarks/README.md`.
+- **Also:** CI smoke now runs the new script, and a focused test
+  (`tests/test_uq_linear_propagation_script.py`) locks the artifact + covariance contract (manifest
+  checksums, `6x6` shape, `J(0) = 0`, CSV header/row count).
+- **Acceptance:** met — script runs on the smoke config and writes artifacts; the doc states the
+  honest scope; CI smoke covers the new script.
 
 ### N4 — Script-level test coverage (MEDIUM)
 
@@ -130,11 +142,12 @@ Open gaps found while surveying the code (evidence in parentheses):
 
 ## Recommended order
 
-`N0 → ~~N1~~ → N2 → N3 → N4`, with `N5`/`N6` optional. **N1 is done.** Rationale: commit first (N0);
-then the low-risk, high-value reproducibility/quality items (N1 done, N2 next) that harden everything
-already built; then complete the propagation capability into a documented, tested deliverable
-(N3, N4). N5 bounds an external subsystem honestly; N6 is the only item that adds new research scope
-and should be a deliberate, separately-approved choice.
+`N0 → ~~N1~~ → ~~N2~~ → ~~N3~~ → N4`, with `N5`/`N6` optional. **N1–N3 are done; N4 is next.**
+Rationale: commit first (N0); then the low-risk, high-value reproducibility/quality items (N1, N2)
+that harden everything already built; then complete the propagation capability into a documented,
+tested deliverable (N3 done, N4 next — pytest-level output-schema assertions for the remaining
+smoke-only scripts). N5 bounds an external subsystem honestly; N6 is the only item that adds new
+research scope and should be a deliberate, separately-approved choice.
 
 ## Out of scope (and why)
 

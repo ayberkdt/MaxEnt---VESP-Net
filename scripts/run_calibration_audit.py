@@ -30,7 +30,6 @@ import torch
 
 from vesp.common.config import get_dtype, load_config
 from vesp.uq.audit import audit_summary_dict, evaluate_false_negatives, select_sentinel_audit
-from vesp.uq.io.run_artifacts import write_run_artifacts
 from vesp.uq.conformal import coverage_before_after, fit_conformal_scale
 from vesp.uq.data import split_uq_samples
 from vesp.uq.ensemble import nearest_neighbor_error_magnitude
@@ -40,6 +39,7 @@ from vesp.uq.experiment import (
     _resolve_time_weighting,
     _time_weights,
 )
+from vesp.uq.io.run_artifacts import write_run_artifacts
 from vesp.uq.metrics import mahalanobis_squared
 from vesp.uq.plugin import VESPUQPlugin
 from vesp.uq.scoring import aggregate_trajectory_error
@@ -77,7 +77,7 @@ def heldout_force_error_pair(plugin: VESPUQPlugin, held, mode: str):
     residual = held.error - cov.mean_error  # (N, 3) predictive residual force error
     if mode == "mahalanobis":
         d = torch.sqrt(mahalanobis_squared(residual, cov.covariance).clamp_min(0.0))
-        predicted = torch.full_like(d, float(3.0) ** 0.5)  # E[d] reference for chi-square(3)
+        predicted = torch.full_like(d, 3.0 ** 0.5)  # E[d] reference for chi-square(3)
         return predicted, d
     if mode == "component_max":
         return cov.std_components, residual

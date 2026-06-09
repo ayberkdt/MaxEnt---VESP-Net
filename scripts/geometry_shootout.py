@@ -13,12 +13,12 @@ per-band calibration table (does better geometry -> better low-altitude calibrat
 from __future__ import annotations
 
 import argparse
+import contextlib
 import csv
 import io
-import contextlib
+import sys
 from copy import deepcopy
 from pathlib import Path
-import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT / "src") not in sys.path:

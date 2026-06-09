@@ -22,13 +22,12 @@ import json
 from pathlib import Path
 
 import torch
+from run_force_error_benchmark import _benchmark_md, force_error_benchmark, prepare
 
 from vesp.common.config import load_config
 from vesp.uq.ensemble import generate_orbit_ensemble
 from vesp.uq.reporting import calibration_table, csv_text
 from vesp.uq.selection import select_reruns
-
-from run_force_error_benchmark import _benchmark_md, force_error_benchmark, prepare
 
 
 def _calibration_report(plugin, held, config) -> tuple[str, dict]:

@@ -13,8 +13,8 @@ for backward compatibility.
 from __future__ import annotations
 
 import argparse
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Iterable
 
 from vesp.common.artifacts import (
     atomic_write_json,
@@ -24,7 +24,7 @@ from vesp.common.artifacts import (
 )
 from vesp.common.config import load_config
 from vesp.uq.experiment import _resolve_time_weighting, _time_weights, run_vespuq
-from vesp.uq.reporting import build_report_md, build_tables, calibration_table, csv_text
+from vesp.uq.reporting import build_report_md, calibration_table, csv_text
 from vesp.uq.thresholds import resolve_threshold as _resolve_threshold
 
 __all__ = [

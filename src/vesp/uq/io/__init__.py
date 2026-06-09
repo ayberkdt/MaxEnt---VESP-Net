@@ -5,7 +5,7 @@ optionally, the surrogate/reference acceleration pairs needed to fit the residua
 See :func:`vesp.uq.io.trajectory_loader.load_trajectory_csv`.
 """
 
-from vesp.uq.io.trajectory_schema import TrajectoryDataset
 from vesp.uq.io.trajectory_loader import flatten_acceleration_pairs, load_trajectory_csv
+from vesp.uq.io.trajectory_schema import TrajectoryDataset
 
 __all__ = ["TrajectoryDataset", "load_trajectory_csv", "flatten_acceleration_pairs"]

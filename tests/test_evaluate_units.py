@@ -4,8 +4,8 @@ from pathlib import Path
 import pytest
 import torch
 
-from vesp.training import evaluate
 from vesp.core.sources import make_shell_sources
+from vesp.training import evaluate
 
 
 def _write_csv(path: Path, *, with_metadata: bool = True) -> Path:

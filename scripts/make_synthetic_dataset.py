@@ -1,7 +1,7 @@
-from pathlib import Path
 import argparse
 import csv
 import sys
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
@@ -21,7 +21,7 @@ def main() -> None:
     with output.open("w", encoding="utf-8", newline="") as f:
         writer = csv.writer(f)
         writer.writerow(["x", "y", "z", "DeltaU", "Deltaax", "Deltaay", "Deltaaz"])
-        for x, u, a in zip(data.positions, data.potential, data.acceleration):
+        for x, u, a in zip(data.positions, data.potential, data.acceleration, strict=True):
             writer.writerow([float(x[0]), float(x[1]), float(x[2]), float(u[0]), float(a[0]), float(a[1]), float(a[2])])
     print(f"synthetic_dataset: {output}")
 

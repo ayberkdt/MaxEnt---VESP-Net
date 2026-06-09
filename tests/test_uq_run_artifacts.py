@@ -4,12 +4,9 @@ from __future__ import annotations
 
 import json
 
-import pytest
-
+import scripts.run_calibration_audit as ca
 from vesp.common.artifacts import compute_file_sha256
 from vesp.uq.io.run_artifacts import write_run_artifacts
-
-import scripts.run_calibration_audit as ca
 
 
 def test_manifest_records_checksums_and_provenance(tmp_path):

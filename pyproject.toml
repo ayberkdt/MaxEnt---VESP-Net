@@ -19,7 +19,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest"]
+dev = ["pytest", "ruff==0.15.16"]
 
 [tool.setuptools]
 package-dir = {"" = "src"}
@@ -30,3 +30,30 @@ where = ["src"]
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
+
+# --- N2: code-quality lint gate -------------------------------------------------------------
+# Scoped (via the CI lint job) to the VESP-UQ surface, scripts, and tests:
+#   ruff check src/vesp/uq scripts tests
+# Lint only -- the formatter is available locally (`ruff format`) but is intentionally NOT gated
+# in CI, so this stays a behavior-preserving bug/import hygiene check rather than a reformat.
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.ruff.lint]
+# E/W (pycodestyle), F (pyflakes -- catches stray/placeholder + unused imports), I (import
+# sorting), B (bugbear -- real bug smells), UP (pyupgrade -- safe modernizations).
+select = ["E", "F", "I", "W", "B", "UP"]
+# E501 (line-too-long) is left to the formatter, which is not CI-gated here; line width is already
+# self-disciplined in this codebase, so enforcing it would only churn the legacy Stage-1/2 scripts.
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+# Scripts and tests legitimately insert sys.path / configure the environment before importing
+# `vesp`, so module-level imports are not all at the top of the file (E402).
+"scripts/*" = ["E402"]
+"tests/*" = ["E402"]
+
+[tool.ruff.format]
+# Provided so `ruff format` works locally with the same line length; not enforced in CI (N2 scope).
+line-ending = "lf"

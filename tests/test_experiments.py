@@ -13,7 +13,7 @@ import pytest
 
 from vesp.common.config import merge_defaults
 from vesp.core.models import MultiShellDiscreteVESP
-from vesp.experiments.registry import CORE_EXPERIMENTS, experiment_info
+from vesp.experiments.registry import CORE_EXPERIMENTS
 from vesp.experiments.runner import (
     Trial,
     expand_trials,
@@ -184,7 +184,7 @@ def test_constrained_maxent_respects_misfit_and_does_not_lower_entropy():
 
     from vesp.core.solvers import RidgeSolveConfig, solve_discrete_ridge
     from vesp.extensions.entropy import effective_source_entropy
-    from vesp.training.maxent import MaxEntSolveConfig, data_misfit, solve_discrete_maxent_constrained
+    from vesp.training.maxent import MaxEntSolveConfig, solve_discrete_maxent_constrained
 
     torch.manual_seed(0)
     # underdetermined system -> a null space exists for entropy to exploit

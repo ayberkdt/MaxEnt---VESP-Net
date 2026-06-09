@@ -88,7 +88,7 @@ def test_ui_feasibility_config_routes_to_feasibility_module(qapp, monkeypatch, t
         assert "feasibility" in window.summary_labels["output"].text()
 
         called = []
-        monkeypatch.setattr(window, "_run_training", lambda module: called.append(module))
+        monkeypatch.setattr(window, "_run_training", lambda module, called=called: called.append(module))
         window._run_selected_config()
         assert called == ["vesp.training.feasibility"]
 
@@ -101,7 +101,7 @@ def test_ui_train_config_routes_to_unified_train_module(qapp, monkeypatch, tmp_p
         assert window.summary_labels["scaling"].text().startswith("auto:")
 
         called = []
-        monkeypatch.setattr(window, "_run_training", lambda module: called.append(module))
+        monkeypatch.setattr(window, "_run_training", lambda module, called=called: called.append(module))
         window._run_selected_config()
         assert called == ["vesp.training.train"]
 
@@ -187,8 +187,10 @@ def test_ui_experiment_config_routes_to_suite_runner(qapp, monkeypatch, tmp_path
 
         exp_called = []
         train_called = []
-        monkeypatch.setattr(window, "_run_experiment_config", lambda: exp_called.append(True))
-        monkeypatch.setattr(window, "_run_training", lambda module: train_called.append(module))
+        monkeypatch.setattr(window, "_run_experiment_config", lambda exp_called=exp_called: exp_called.append(True))
+        monkeypatch.setattr(
+            window, "_run_training", lambda module, train_called=train_called: train_called.append(module)
+        )
         window._run_selected_config()
         assert exp_called == [True]
         assert train_called == []

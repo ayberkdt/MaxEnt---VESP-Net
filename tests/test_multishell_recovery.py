@@ -1,6 +1,4 @@
-import torch
 
-from vesp.data.synthetic import make_multishell_truth_case
 from vesp.training.train import run_from_config
 
 

@@ -41,7 +41,7 @@ def test_lcurve_closed_form_matches_direct_ridge_solution_norms():
 def test_orbit_ensemble_shapes_and_bounds():
     ens = generate_orbit_ensemble(n_orbits=25, n_points=40, r_peri_range=(1.05, 1.30), r_apo_range=(1.30, 1.6), seed=0)
     assert len(ens.trajectories) == 25
-    for traj, rp, ra in zip(ens.trajectories, ens.periapsis, ens.apoapsis):
+    for traj, rp, ra in zip(ens.trajectories, ens.periapsis, ens.apoapsis, strict=True):
         assert traj.shape == (40, 3)
         r = torch.linalg.norm(traj, dim=-1)
         assert float(ra) >= float(rp)

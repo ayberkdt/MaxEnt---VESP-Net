@@ -18,8 +18,6 @@ from pathlib import Path
 
 import torch
 
-from vesp.uq.io.run_artifacts import write_run_artifacts
-
 from vesp.common.config import get_dtype, load_config
 from vesp.uq.baselines import (
     domain_support_scores,
@@ -32,6 +30,7 @@ from vesp.uq.benchmarking import METRIC_KEYS, _best_by, compare_baselines
 from vesp.uq.data import split_uq_samples
 from vesp.uq.ensemble import nearest_neighbor_error_magnitude
 from vesp.uq.experiment import _build_trajectories, _load_samples
+from vesp.uq.io.run_artifacts import write_run_artifacts
 from vesp.uq.plugin import VESPUQPlugin
 from vesp.uq.scoring import aggregate_trajectory_error
 
@@ -72,7 +71,6 @@ def _true_force_error(trajectories, *, residuals, held, aggregator, dtype):
 def baseline_scores_for(config: dict, plugin, trajectories, *, seed: int):
     """Assemble the baseline -> per-trajectory-score mapping for a fitted plugin + trajectories."""
 
-    screen_cfg = config.get("uq", {}).get("screening", {})
     low_alt = float(config.get("uq", {}).get("risk", {}).get("low_altitude_radius", 1.15))
     n = len(trajectories)
     scores = {

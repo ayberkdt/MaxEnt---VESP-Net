@@ -1,12 +1,14 @@
-import torch
 import numpy as np
+import torch
 import yaml
+
 from vesp.uq.data import load_uq_samples_from_csv
 from vesp.uq.plugin import VESPUQPlugin
 
+
 def main():
     cfg_path = "configs/vespuq/vespuq_real_lunar.yaml"
-    with open(cfg_path, "r") as f:
+    with open(cfg_path) as f:
         cfg = yaml.safe_load(f)
 
     device = torch.device(cfg.get("device", "cpu"))
@@ -19,12 +21,12 @@ def main():
 
     n_total = samples.n
     print(f"Total samples available: {n_total}")
-    
+
     indices = np.random.RandomState(42).permutation(n_total)
     n_train = int(n_total * 0.8)  # 80% train, 20% test
     if n_train > 10000:
         n_train = 10000
-    
+
     train_idx = indices[:n_train]
     test_idx = indices[n_train:]
 

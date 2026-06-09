@@ -64,7 +64,7 @@ class UQSamples:
     def radius(self) -> torch.Tensor:
         return torch.linalg.norm(self.positions, dim=-1)
 
-    def subset(self, indices: torch.Tensor) -> "UQSamples":
+    def subset(self, indices: torch.Tensor) -> UQSamples:
         return UQSamples(
             positions=self.positions[indices],
             error=self.error[indices],
@@ -73,7 +73,7 @@ class UQSamples:
             metadata=self.metadata,
         )
 
-    def to(self, device: torch.device | str) -> "UQSamples":
+    def to(self, device: torch.device | str) -> UQSamples:
         return UQSamples(
             positions=self.positions.to(device),
             error=self.error.to(device),
@@ -132,7 +132,7 @@ def load_uq_samples_from_csv(
     if mode not in {"auto", "error", "reference_surrogate"}:
         raise ValueError("mode must be 'auto', 'error', or 'reference_surrogate'")
     path = Path(path)
-    with open(path, "r", encoding="utf-8-sig", newline="") as f:
+    with open(path, encoding="utf-8-sig", newline="") as f:
         reader = csv.DictReader(f)
         if reader.fieldnames is None:
             raise ValueError(f"CSV file has no header: {path}")

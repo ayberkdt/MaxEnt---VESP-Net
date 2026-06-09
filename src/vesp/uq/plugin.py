@@ -41,6 +41,8 @@ from vesp.extensions.probabilistic import (
 )
 from vesp.uq.domain_support import (
     domain_support_components as _domain_support_components,
+)
+from vesp.uq.domain_support import (
     make_domain_backend,
     median_angular_scale,
     median_knn_scale,
@@ -48,8 +50,10 @@ from vesp.uq.domain_support import (
 from vesp.uq.metrics import vector_calibration_metrics
 from vesp.uq.scoring import (
     TrajectoryScore,
-    calibrate_risk_threshold as _calibrate_risk_threshold,
     score_sigma_profile,
+)
+from vesp.uq.scoring import (
+    calibrate_risk_threshold as _calibrate_risk_threshold,
 )
 
 COVARIANCE_MODES = ("exact", "diagonal", "lowrank")
@@ -187,7 +191,7 @@ class VESPUQPlugin:
 
     # ------------------------------------------------------------------ construction
     @classmethod
-    def from_config(cls, config: dict) -> "VESPUQPlugin":
+    def from_config(cls, config: dict) -> VESPUQPlugin:
         """Build a plugin from a config dict (reuses the ``model``/``kernel`` conventions)."""
 
         dtype = torch.float64 if str(config.get("dtype", "float64")).lower() in {"float64", "double"} else torch.float32
@@ -326,7 +330,7 @@ class VESPUQPlugin:
         val_positions=None,
         val_surrogate_acceleration=None,
         val_reference_acceleration=None,
-    ) -> "VESPUQPlugin":
+    ) -> VESPUQPlugin:
         """Fit the equivalent-source error posterior from surrogate/reference acceleration samples.
 
         Computes ``error = reference - surrogate`` and delegates to :meth:`fit_error`.
@@ -347,7 +351,7 @@ class VESPUQPlugin:
             )
         return self.fit_error(positions, error, val_positions=val_positions, val_error=val_error)
 
-    def fit_error(self, positions, error, *, val_positions=None, val_error=None) -> "VESPUQPlugin":
+    def fit_error(self, positions, error, *, val_positions=None, val_error=None) -> VESPUQPlugin:
         """Fit directly from sampled force-error vectors ``error = a_reference - a_surrogate``.
 
         The Tikhonov weight is selected automatically (L-curve corner by default). The posterior
@@ -692,7 +696,7 @@ class VESPUQPlugin:
             raise ValueError("weights must be None or one weight vector per trajectory")
         return [
             self.score_trajectory(t, scoring=scoring, weights=w)
-            for t, w in zip(traj_list, weight_list)
+            for t, w in zip(traj_list, weight_list, strict=True)
         ]
 
     # ------------------------------------------------------------------ threshold calibration

@@ -28,7 +28,6 @@ from vesp.uq.io.trajectory_schema import (
     _REF_ALIASES,
     _SUR_ALIASES,
     _TIME_ALIASES,
-    POSITION_COLUMNS,
     REFERENCE_COLUMNS,
     SURROGATE_COLUMNS,
     TrajectoryDataset,
@@ -37,7 +36,6 @@ from vesp.uq.physical_units import (
     MODEL_UNITS,
     AccelerationScale,
     acceleration_to_model_units,
-    is_physical_units,
     normalize_units,
 )
 
@@ -101,7 +99,7 @@ def load_trajectory_csv(
     convert_accel = accel_units != MODEL_UNITS
 
     path = Path(path)
-    with open(path, "r", encoding="utf-8-sig", newline="") as f:
+    with open(path, encoding="utf-8-sig", newline="") as f:
         reader = csv.DictReader(f)
         if reader.fieldnames is None:
             raise ValueError(f"trajectory CSV has no header: {path}")

@@ -43,7 +43,7 @@ def _write_physical_csv(tmp_path):
     with path.open("w", encoding="utf-8", newline="") as f:
         w = csv.writer(f)
         w.writerow(["x", "y", "z", "Delta U", "Delta a_x", "Delta a_y", "Delta a_z"])
-        for x, u, a in zip(query, potential, accel_physical):
+        for x, u, a in zip(query, potential, accel_physical, strict=True):
             w.writerow([float(x[0]), float(x[1]), float(x[2]), float(u[0]), float(a[0]), float(a[1]), float(a[2])])
     metadata = {
         "position_units": "normalized",

@@ -3,13 +3,13 @@ import json
 import pytest
 import torch
 
-from vesp.data.dataset import ResidualGravityData, load_csv_dataset, prepare_data_for_model
 from vesp.common.units import (
     PositionScaler,
     UnitConfig,
     normalized_gradient_to_physical_acceleration,
     physical_acceleration_to_normalized_gradient,
 )
+from vesp.data.dataset import ResidualGravityData, load_csv_dataset, prepare_data_for_model
 
 
 def test_source_body_radius_normalized():

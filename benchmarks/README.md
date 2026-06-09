@@ -15,6 +15,8 @@ It matters *what each benchmark tests* — a result can be strong on one and nul
 | Baseline comparison | [`baseline_comparison.md`](baseline_comparison.md) | does the VESP-UQ score beat trivial heuristics (min-altitude, exposure) at ranking **true force error**? |
 | Conformal calibration + sentinel audit | [`calibration_audit.md`](calibration_audit.md) | does post-hoc conformal scaling improve held-out **force-error** coverage, and what is the false-negative rate among accepted low-risk trajectories? |
 | Physical acceleration-budget screening | [`physical_budget_screening.md`](physical_budget_screening.md) | flag trajectories whose force-risk exceeds a physical acceleration-error budget (e.g. `1e-8 m/s^2`), converting the budget into model units via an explicit scale. |
+| Force-error covariance propagation (STM) | [`covariance_propagation.md`](covariance_propagation.md) | deterministic linearized (STM) `6x6` **force-error** state covariance along a nominal orbit (exploratory; **not** validated orbit determination). |
+| Force-error covariance propagation (MC) | [`covariance_propagation.md`](covariance_propagation.md) | Monte Carlo orbit-dispersion sample covariance of the **same** force-error posterior; cross-checks the STM result and agrees in the small-perturbation regime. |
 | Position-error diagnostic | [`position_error_diagnostic.md`](position_error_diagnostic.md) | does force-risk *co-rank* long-horizon ST-LRPS **position** error? (diagnostic only) |
 
 Two scoring families are used:
@@ -41,6 +43,8 @@ python scripts/run_force_error_benchmark.py --config configs/vespuq/vespuq_real_
 python scripts/run_calibration_audit.py --config configs/vespuq/vespuq_smoke.yaml          # conformal coverage + sentinel audit
 python scripts/run_physical_budget_screening.py --config configs/vespuq/vespuq_smoke.yaml \
     --budget 1e-8 --units m/s^2 --scoring expected_abs_p95                                  # physical acceleration budget
+python scripts/run_linear_propagation.py --config configs/vespuq/vespuq_smoke.yaml          # STM force-error covariance (deterministic)
+python scripts/run_propagation.py --config configs/vespuq/vespuq_real_lunar.yaml            # MC orbit-dispersion sampler (cross-check)
 python scripts/analyze_512_orbits.py                                             # ST-LRPS position-error diagnostic
 ```
 

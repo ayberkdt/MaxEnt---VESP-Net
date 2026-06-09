@@ -3,18 +3,16 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 import pytest
 import torch
 
+import scripts.run_physical_budget_screening as pbs
 from vesp.core.sources import make_shell_sources
 from vesp.uq import VESPUQPlugin, make_synthetic_uq_samples
 from vesp.uq.data import split_uq_samples
 from vesp.uq.physical_units import resolve_acceleration_scale
 from vesp.uq.thresholds import resolve_physical_budget_threshold, resolve_threshold
-
-import scripts.run_physical_budget_screening as pbs
 
 
 def _fitted_plugin_and_held():
@@ -247,7 +245,7 @@ def test_script_conformal_flag_runs_and_reports(tmp_path):
         conformal=True,
     )
     pbs._configure_physical_budget(cfg, args)
-    result = pbs.run_and_write(cfg, out_dir=tmp_path / "pb")
+    pbs.run_and_write(cfg, out_dir=tmp_path / "pb")
     data = json.loads((tmp_path / "pb" / "physical_budget_screening.json").read_text())
     assert data["conformal"]["enabled"] is True
     assert data["conformal"]["scale"] is not None

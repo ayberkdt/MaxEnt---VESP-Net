@@ -1,11 +1,11 @@
 import torch
 
-from vesp.data.dataset import ResidualGravityData, split_data
 from vesp.core.kernels import evaluate_kernel
 from vesp.core.models import DiscreteVESP
 from vesp.core.sources import single_shell_sources
-from vesp.training.train_discrete import solve_ridge
+from vesp.data.dataset import ResidualGravityData, split_data
 from vesp.training.evaluate import evaluate_model
+from vesp.training.train_discrete import solve_ridge
 
 
 def test_same_family_synthetic_recovery():
