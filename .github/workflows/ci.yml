@@ -39,7 +39,7 @@ jobs:
           # Editable install without deps, then CPU-only runtime deps. PyQt6 is intentionally
           # omitted -- the UI test importorskips it, so it is skipped rather than failing CI.
           pip install -e . --no-deps
-          pip install numpy scipy pandas matplotlib pyyaml pytest
+          pip install numpy scipy pandas matplotlib pyyaml pytest hypothesis
           pip install torch --index-url https://download.pytorch.org/whl/cpu
 
       - name: Run test suite
