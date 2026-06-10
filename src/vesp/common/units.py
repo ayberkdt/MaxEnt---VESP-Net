@@ -18,7 +18,7 @@ class UnitConfig:
     physical_R_body_units: str = "km"
 
     @classmethod
-    def from_config(cls, config: dict) -> "UnitConfig":
+    def from_config(cls, config: dict) -> UnitConfig:
         body = config.get("body", {})
         physical_r_body = body.get("physical_R_body", body.get("R_body_physical"))
         return cls(

@@ -58,6 +58,22 @@ It is surrogate-agnostic: it only needs acceleration samples, not the surrogate'
   residual-force-error fitting/scoring).
 - CSV artifacts: `calibration_by_band.csv`, `trajectory_scores.csv`, `flagged_trajectories.csv`,
   `fit_summary.json`; JSON + Markdown reports with an IAC claim summary.
+- **Fitted-layer persistence** (`VESPUQPlugin.save` / `.load`, `output.save_model: true` or
+  `--save-model` → `vespuq_plugin.pt` in the run manifest): fit once, reload for screening /
+  correction / propagation without refitting; round-trip predictions are identical. The artifact
+  packages the training run's **decision policy** (scoring, threshold + provenance, units) and
+  ships with a **model card** (`vespuq_plugin_card.md`).
+- **Train/serve separation**: `python -m vesp.uq.run` (training driver) vs
+  `python -m vesp.uq.screen` (serve driver: load model, score external CSV or generated
+  ensembles, apply/override the packaged policy, no refit). Manifests checksum consumed
+  **inputs** (model, dataset/trajectory CSVs) as well as outputs.
+- **Exact sequential update** (`VESPUQPlugin.update_error`): closed-form conjugate update equal
+  to the batch refit on concatenated data (same `lambda`/noise); optional fresh-held-out
+  recalibration of the noise floor + altitude law. The L-curve is not re-run (see
+  `docs/VESP_UQ_LIMITATIONS.md`).
+- **Batched + query-chunked prediction**: `score_ensemble` scores the whole ensemble in batched
+  dense passes and all prediction paths chunk over queries (`uq.query_chunk_size`), bounding
+  memory with per-trajectory numbers identical to sequential scoring.
 
 **Force-risk / OOD vs position-error diagnostic.** The core deliverable is *force-model risk /
 OOD detection* — does the score flag low-altitude/OOD passes and rank the surrogate's true
@@ -85,9 +101,13 @@ is not force-model-error dominated.
 
 - A **validated** ST-LRPS (or other named surrogate) integration with an explicitly-tested
   orbit-accuracy / covariance-realism result.
-- Online correction `a_corrected = a_surrogate + mean_error` inside an integrator (Phase 5).
 - Validated operational orbit/state covariance realism (the MC and STM propagators above are
   exploratory only).
+
+(The Phase-5 online correction `a_corrected = a_surrogate + mean_error` is now implemented as an
+**exploratory** force-model correction — `vesp.uq.correction`, benchmarked with measured accuracy
+**and** per-RHS cost in `benchmarks/online_force_correction.md`; it carries no long-horizon
+position-accuracy claim. See `docs/VESP_UQ_LIMITATIONS.md`.)
 
 ## Safe claims
 

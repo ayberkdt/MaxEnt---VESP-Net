@@ -47,7 +47,8 @@ jobs:
 
       - name: Smoke (existing + new VESP-UQ commands must keep working)
         run: |
-          python -m vesp.uq.run --config configs/vespuq/vespuq_smoke.yaml
+          python -m vesp.uq.run --config configs/vespuq/vespuq_smoke.yaml --save-model
+          python -m vesp.uq.screen --model outputs/vespuq_smoke/vespuq_plugin.pt --config configs/vespuq/vespuq_smoke.yaml --out outputs/vespuq_screen_smoke
           python scripts/run_force_error_benchmark.py --config configs/vespuq/vespuq_smoke.yaml
           python scripts/compare_risk_baselines.py --config configs/vespuq/vespuq_smoke.yaml
           python scripts/run_calibration_audit.py --config configs/vespuq/vespuq_smoke.yaml

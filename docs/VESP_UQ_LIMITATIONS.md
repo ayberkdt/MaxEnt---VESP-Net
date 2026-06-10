@@ -104,6 +104,33 @@ advantage (the smoke run shows a large accuracy gain at ~17× the per-RHS cost).
 lies in the equivalent-source span, so those numbers are a **best-case** illustration, not a
 validated result.
 
+## Sequential update: exact for the posterior, NOT an automatic recalibration
+
+`VESPUQPlugin.update_error` conditions the fitted posterior on new error samples in closed form;
+with the same Tikhonov weight and noise floor it **equals the batch refit on the concatenated
+data exactly** (pinned by `tests/test_uq_sequential_update.py`). What an update deliberately does
+**not** do:
+
+- it never re-runs the L-curve -- `lambda` stays at the original fit's value (re-selecting the
+  prior weight would break the exact-update contract);
+- it does not touch the global noise floor or the altitude noise law unless a **fresh held-out**
+  `val_positions`/`val_error` pair is supplied (then both are recalibrated exactly as in
+  `fit_error`).
+
+So after a large update without fresh validation data, the per-band coverage numbers from the
+original fit are stale: **re-validate** (`evaluate_calibration` on new held-out samples) before
+relying on calibration claims, and prefer passing fresh validation data to the update itself.
+
+## Serve-time screening has no oracle
+
+`python -m vesp.uq.screen` (the serve driver) scores trajectories with a persisted model and
+deliberately provides **no nearest-neighbour ground-truth oracle** -- serving has no calibration
+samples, and inventing an oracle there would blur the train/serve boundary. Unless the trajectory
+CSV itself carries surrogate/reference acceleration pairs (then the residual force error is used
+as a *diagnostic*), serve outputs are force-risk / OOD scores only. A threshold packaged with the
+model is applied **only** when the serve-time scoring mode matches the mode it was calibrated
+for; thresholds never transfer across score scales.
+
 ## Exact covariance can be expensive
 
 The exact `3x3` predictive covariance costs `O(m · n_sources^2)` for `m` query points. For large

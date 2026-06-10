@@ -7,10 +7,10 @@ it can silently contaminate experiments.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Mapping
-
+from typing import Any
 
 MU_MOON_SI: float = 4_904_869_500_000.0
 R_MOON_M: float = 1_738_000.0

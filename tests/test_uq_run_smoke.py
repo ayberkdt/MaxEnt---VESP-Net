@@ -53,3 +53,26 @@ def test_trajectory_scores_csv_has_expected_columns(tmp_path):
     header = (tmp_path / "smoke2" / "trajectory_scores.csv").read_text(encoding="utf-8").splitlines()[0]
     for col in ("trajectory_id", "risk_score", "max_sigma", "flagged_for_rerun", "true_error"):
         assert col in header
+
+
+def test_run_save_model_persists_loadable_plugin(tmp_path):
+    import json
+
+    from vesp.uq import VESPUQPlugin
+
+    cfg = load_config(ROOT / "configs" / "vespuq" / "vespuq_smoke.yaml")
+    cfg["output"]["output_dir"] = str(tmp_path)
+    cfg["output"]["run_name"] = "smoke3"
+    cfg["output"]["save_model"] = True
+    run(cfg)
+
+    model_path = tmp_path / "smoke3" / "vespuq_plugin.pt"
+    assert model_path.exists(), "save_model: true must write vespuq_plugin.pt"
+
+    manifest = json.loads((tmp_path / "smoke3" / "run_manifest.json").read_text(encoding="utf-8"))
+    assert "vespuq_plugin_pt" in manifest["artifacts"], "manifest must checksum the saved plugin"
+
+    loaded = VESPUQPlugin.load(model_path)
+    pred = loaded.predict_uncertainty([[0.0, 0.0, 1.2], [0.0, 1.4, 0.0]])
+    assert pred.sigma.shape == (2,)
+    assert bool((pred.sigma > 0).all())

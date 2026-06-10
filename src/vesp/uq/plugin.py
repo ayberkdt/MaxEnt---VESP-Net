@@ -27,9 +27,11 @@ value is the *error bars* and the trajectory risk screen they enable.
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+from pathlib import Path
 
 import torch
 
+from vesp.common.artifacts import atomic_torch_save, json_safe
 from vesp.core.diagnostics import source_diagnostics
 from vesp.core.operators import build_acceleration_operator
 from vesp.core.regularization import lcurve_lambda
@@ -37,6 +39,7 @@ from vesp.core.sources import SourceSet, make_shell_sources
 from vesp.extensions.probabilistic import (
     AltitudeNoiseModel,
     LinearGaussianPosterior,
+    _safe_cholesky,
     calibration_metrics,
 )
 from vesp.uq.domain_support import (
@@ -57,6 +60,10 @@ from vesp.uq.scoring import (
 )
 
 COVARIANCE_MODES = ("exact", "diagonal", "lowrank")
+
+# Versioned on-disk format for a fitted plugin (see VESPUQPlugin.save / .load).
+PLUGIN_STATE_FORMAT = "vesp.uq.plugin"
+PLUGIN_STATE_VERSION = 1
 
 
 @dataclass
@@ -120,6 +127,7 @@ class VESPUQPlugin:
         eps: float = 0.0,
         acceleration_sign: float = 1.0,
         source_chunk_size: int | None = 1024,
+        query_chunk_size: int | None = 8192,
         reg_method: str = "lcurve",
         lambda_l2: float = 30.0,
         noise_model: str = "heteroscedastic",
@@ -147,6 +155,8 @@ class VESPUQPlugin:
             raise ValueError("noise_model must be 'homoscedastic' or 'heteroscedastic'")
         if covariance_mode not in COVARIANCE_MODES:
             raise ValueError(f"covariance_mode must be one of {COVARIANCE_MODES}")
+        if query_chunk_size is not None and int(query_chunk_size) <= 0:
+            raise ValueError("query_chunk_size must be a positive int or None")
         self.covariance_mode = covariance_mode
         self.lowrank_rank = int(lowrank_rank)
         self._cov_eig: tuple[torch.Tensor, torch.Tensor] | None = None
@@ -156,6 +166,7 @@ class VESPUQPlugin:
         self.eps = float(eps)
         self.acceleration_sign = float(acceleration_sign)
         self.source_chunk_size = source_chunk_size
+        self.query_chunk_size = int(query_chunk_size) if query_chunk_size is not None else None
         self.reg_method = reg_method
         self.lambda_l2 = float(lambda_l2)
         self.noise_model = noise_model
@@ -178,6 +189,10 @@ class VESPUQPlugin:
         self.posterior: LinearGaussianPosterior | None = None
         self.altitude_noise: AltitudeNoiseModel | None = None
         self.fit_info: dict = {}
+        # Free-form, JSON-safe metadata persisted with the model (e.g. the training run's
+        # decision policy / provenance). Round-trips through save()/load(); never interpreted
+        # by the plugin itself.
+        self.user_metadata: dict = {}
 
         # domain-support state (populated by fit_error; used by domain_support_score)
         self.train_positions: torch.Tensor | None = None
@@ -230,6 +245,7 @@ class VESPUQPlugin:
             eps=float(kernel.get("eps", kernel.get("softening", 0.0))),
             acceleration_sign=float(kernel.get("acceleration_sign", 1.0)),
             source_chunk_size=kernel.get("source_chunk_size", 1024),
+            query_chunk_size=uq.get("query_chunk_size", 8192),
             reg_method=reg_method,
             lambda_l2=lambda_l2,
             noise_model=str(uq.get("noise_model", "heteroscedastic")).lower(),
@@ -319,6 +335,14 @@ class VESPUQPlugin:
             "variance": variance,
             "std": torch.sqrt(variance.clamp_min(torch.finfo(mean.dtype).tiny)),
         }
+
+    def _query_chunks(self, n: int) -> list[tuple[int, int]]:
+        """Half-open ``(start, end)`` query slices honoring ``query_chunk_size`` (one slice if off)."""
+
+        size = self.query_chunk_size
+        if size is None or n <= size:
+            return [(0, n)]
+        return [(start, min(start + size, n)) for start in range(0, n, size)]
 
     # ------------------------------------------------------------------ fitting
     def fit(
@@ -461,12 +485,143 @@ class VESPUQPlugin:
             self.fit_info["lcurve"] = lcurve_points
         return self
 
-    # ------------------------------------------------------------------ prediction
-    def predict_uncertainty(self, positions) -> UncertaintyPrediction:
-        """Predict the mean force-error and calibrated per-position predictive uncertainty."""
+    # ------------------------------------------------------------------ sequential update
+    def update_error(self, positions, error, *, val_positions=None, val_error=None) -> VESPUQPlugin:
+        """EXACT sequential Bayesian update of the fitted posterior with new error samples.
+
+        Because the model is linear-Gaussian, conditioning the current posterior on additional
+        rows ``(A2, b2)`` with the SAME Tikhonov weight and noise floor is exact -- it equals the
+        batch refit on the concatenated data:
+
+            M1    = noise_var * Sigma1^{-1}          (= A1^T A1 + lambda I, recovered from cov)
+            M2    = M1 + A2^T A2
+            mean2 = M2^{-1} (M1 mean1 + A2^T b2)     (M1 mean1 = A1^T b1 exactly)
+            Sigma2 = noise_var * M2^{-1}
+
+        Deliberately FIXED across an update (exactness over re-selection):
+
+        - the Tikhonov weight ``lambda`` -- the L-curve is NOT re-run (re-selecting lambda would
+          change the prior and break the exact-update contract);
+        - the global noise floor and the altitude noise law -- UNLESS a fresh held-out
+          ``val_positions``/``val_error`` pair is supplied, in which case both are recalibrated
+          on it (same procedure as :meth:`fit_error`). Without fresh validation data the
+          calibration is the one from the original fit: re-validate before relying on per-band
+          coverage after large updates.
+
+        The domain-support calibration geometry is extended with the new positions (cached
+        nearest-neighbour scales are invalidated and recomputed lazily).
+        """
 
         self._require_fitted()
         positions = self._prep_positions(positions)
+        error = self._prep_positions(error)
+        if positions.shape[0] == 0:
+            raise ValueError("update_error requires at least one new sample")
+        if positions.shape != error.shape:
+            raise ValueError("positions and error must have the same (N, 3) shape")
+
+        noise_var = self.posterior.noise_var
+        lambda_used = self.posterior.lambda_l2
+
+        # Recover the posterior precision (up to the noise scale) from the stored covariance.
+        chol_cov = torch.linalg.cholesky(self.posterior.cov)
+        m1 = noise_var * torch.cholesky_inverse(chol_cov)
+        a2 = self._operator(positions)
+        b2 = _flatten_acc(error)
+        m2 = m1 + a2.transpose(-1, -2) @ a2
+        rhs = m1 @ self.posterior.mean + a2.transpose(-1, -2) @ b2
+        chol2 = _safe_cholesky(m2, jitter=1.0e-10)
+        mean2 = torch.cholesky_solve(rhs.unsqueeze(-1), chol2).squeeze(-1)
+
+        # Optional honest recalibration on FRESH held-out data (mirrors fit_error: the noise
+        # floor comes from held-out residuals of the updated mean, which is noise-scale-free).
+        val_pos = val_err = None
+        if val_positions is not None or val_error is not None:
+            if val_positions is None or val_error is None:
+                raise ValueError("supply both val_positions and val_error (or neither)")
+            val_pos = self._prep_positions(val_positions)
+            val_err = self._prep_positions(val_error)
+            val_op = self._operator(val_pos)
+            val_resid = val_op @ mean2 - _flatten_acc(val_err)
+            noise_var = max(float(torch.mean(val_resid * val_resid).detach().cpu()),
+                            float(torch.finfo(mean2.dtype).tiny))
+
+        self.posterior = LinearGaussianPosterior(
+            mean=mean2,
+            cov=noise_var * torch.cholesky_inverse(chol2),
+            noise_var=noise_var,
+            lambda_l2=lambda_used,
+        )
+        self._cov_eig = None
+
+        # Extend the domain-support geometry; the new samples are calibration support now.
+        self.train_positions = torch.cat([self.train_positions, positions.detach()], dim=0)
+        self.train_radii = torch.linalg.norm(self.train_positions, dim=-1).detach()
+        self._domain_scale = None
+        self._domain_scale_k = None
+        self._domain_angular_scale = None
+
+        if val_pos is not None:
+            self.val_positions = val_pos.detach()
+            self.val_radii = torch.linalg.norm(val_pos, dim=-1).detach()
+            if self.noise_model == "heteroscedastic":
+                val_op = self._operator(val_pos)
+                val_pred = self.posterior.predict(val_op, include_noise=False)
+                val_resid = val_pred["mean"] - _flatten_acc(val_err)
+                self.altitude_noise = AltitudeNoiseModel.fit(
+                    torch.linalg.norm(val_pos, dim=-1).repeat(3),
+                    val_resid,
+                    val_pred["epistemic_variance"] + noise_var,
+                )
+
+        # Bookkeeping: the fit provenance now reflects the updated state.
+        self.fit_info["n_train"] = int(self.train_positions.shape[0])
+        self.fit_info["n_updates"] = int(self.fit_info.get("n_updates", 0)) + 1
+        self.fit_info["noise_var"] = self.posterior.noise_var
+        self.fit_info["noise_std"] = float(self.posterior.noise_var ** 0.5)
+        self.fit_info["train_radius_min"] = float(self.train_radii.min())
+        self.fit_info["train_radius_max"] = float(self.train_radii.max())
+        if val_pos is not None:
+            self.fit_info["n_val"] = int(val_pos.shape[0])
+            if self.altitude_noise is not None:
+                self.fit_info["altitude_noise_a"] = self.altitude_noise.a
+                self.fit_info["altitude_noise_b"] = self.altitude_noise.b
+        return self
+
+    # ------------------------------------------------------------------ prediction
+    def predict_uncertainty(self, positions) -> UncertaintyPrediction:
+        """Predict the mean force-error and calibrated per-position predictive uncertainty.
+
+        Queries are processed in ``query_chunk_size`` blocks so the dense ``(3N, n_sources)``
+        operator never has to be materialized for a large position set at once.
+        """
+
+        self._require_fitted()
+        positions = self._prep_positions(positions)
+        chunks = self._query_chunks(positions.shape[0])
+        if len(chunks) == 1:
+            return self._predict_uncertainty_block(positions)
+        parts = [self._predict_uncertainty_block(positions[a:b]) for a, b in chunks]
+        fields = {
+            name: torch.cat([getattr(p, name) for p in parts], dim=0)
+            for name in (
+                "positions",
+                "radius",
+                "mean_error",
+                "std_components",
+                "sigma",
+                "epistemic_sigma",
+                "mean_error_magnitude",
+                "expected_error",
+                "epistemic_fraction",
+                "risk_score",
+            )
+        }
+        return UncertaintyPrediction(**fields)
+
+    def _predict_uncertainty_block(self, positions: torch.Tensor) -> UncertaintyPrediction:
+        """Single-block uncertainty prediction (``positions`` already validated/prepped)."""
+
         n = positions.shape[0]
         op = self._operator(positions)
         radius = torch.linalg.norm(positions, dim=-1)
@@ -508,12 +663,28 @@ class VESPUQPlugin:
         the source-posterior (epistemic) covariance and the aleatoric noise floor. ``diagonal``
         mode returns diagonal covariances (off-diagonal source correlations dropped); ``exact``
         and ``lowrank`` return the full (or low-rank-approximated) ``3x3``.
+
+        Queries are processed in ``query_chunk_size`` blocks (same policy as
+        :meth:`predict_uncertainty`).
         """
 
         self._require_fitted()
         positions = self._prep_positions(positions)
+        chunks = self._query_chunks(positions.shape[0])
+        if len(chunks) == 1:
+            return self._predict_covariance_block(positions)
+        parts = [self._predict_covariance_block(positions[a:b]) for a, b in chunks]
+        fields = {
+            name: torch.cat([getattr(p, name) for p in parts], dim=0)
+            for name in ("positions", "mean_error", "covariance", "std_components", "sigma")
+        }
+        return CovariancePrediction(**fields)
+
+    def _predict_covariance_block(self, positions: torch.Tensor, *, operator: torch.Tensor | None = None) -> CovariancePrediction:
+        """Single-block ``3x3`` covariance prediction (``positions`` already validated/prepped)."""
+
         n = positions.shape[0]
-        op = self._operator(positions)
+        op = operator if operator is not None else self._operator(positions)
         opx, opy, opz = op[:n], op[n : 2 * n], op[2 * n :]
         radius = torch.linalg.norm(positions, dim=-1)
 
@@ -650,19 +821,16 @@ class VESPUQPlugin:
         return self.domain_support_components(positions, k=k, chunk=chunk)["total_score"]
 
     # ------------------------------------------------------------------ trajectory scoring
-    def score_trajectory(
-        self, positions_over_time, *, scoring: str | None = None, weights=None
+    def _score_profile(
+        self,
+        pred: UncertaintyPrediction,
+        *,
+        domain_risk: torch.Tensor | None,
+        scoring: str | None,
+        weights,
     ) -> TrajectoryScore:
-        """Score one trajectory (``(T, 3)`` output positions) into a :class:`TrajectoryScore`.
+        """Aggregate one trajectory's per-point profile with the plugin's scoring settings."""
 
-        ``weights`` (optional, one per output point) lets callers down-weight oversampled
-        regions (e.g. periapsis for true-anomaly-uniform orbits); ``None`` keeps the uniform
-        time assumption. Domain-support point risk is included only when ``domain_support`` was
-        enabled on the plugin.
-        """
-
-        pred = self.predict_uncertainty(positions_over_time)
-        domain_risk = self.domain_support_score(pred.positions) if self.domain_support else None
         return score_sigma_profile(
             pred.sigma,
             pred.radius,
@@ -678,6 +846,21 @@ class VESPUQPlugin:
             weights=weights,
         )
 
+    def score_trajectory(
+        self, positions_over_time, *, scoring: str | None = None, weights=None
+    ) -> TrajectoryScore:
+        """Score one trajectory (``(T, 3)`` output positions) into a :class:`TrajectoryScore`.
+
+        ``weights`` (optional, one per output point) lets callers down-weight oversampled
+        regions (e.g. periapsis for true-anomaly-uniform orbits); ``None`` keeps the uniform
+        time assumption. Domain-support point risk is included only when ``domain_support`` was
+        enabled on the plugin.
+        """
+
+        pred = self.predict_uncertainty(positions_over_time)
+        domain_risk = self.domain_support_score(pred.positions) if self.domain_support else None
+        return self._score_profile(pred, domain_risk=domain_risk, scoring=scoring, weights=weights)
+
     def score_ensemble(
         self, trajectories, *, scoring: str | None = None, weights=None
     ) -> list[TrajectoryScore]:
@@ -686,18 +869,55 @@ class VESPUQPlugin:
         ``weights`` is either ``None`` (uniform time weighting for every trajectory) or an
         iterable of per-trajectory weight vectors aligned with ``trajectories`` (entries may be
         ``None`` to keep a given trajectory uniform).
+
+        The ensemble is scored in one batched pass: all trajectory points are concatenated and
+        pushed through :meth:`predict_uncertainty` (which is query-chunked, so memory stays
+        bounded) and one domain-support call, then the per-point profile is split back per
+        trajectory. Per-trajectory numbers are identical to calling :meth:`score_trajectory` in
+        a loop -- this is purely an amortization of operator construction and matmul dispatch.
         """
 
         traj_list = list(trajectories)
         if weights is None:
-            return [self.score_trajectory(t, scoring=scoring) for t in traj_list]
-        weight_list = list(weights)
-        if len(weight_list) != len(traj_list):
-            raise ValueError("weights must be None or one weight vector per trajectory")
-        return [
-            self.score_trajectory(t, scoring=scoring, weights=w)
-            for t, w in zip(traj_list, weight_list, strict=True)
-        ]
+            weight_list = [None] * len(traj_list)
+        else:
+            weight_list = list(weights)
+            if len(weight_list) != len(traj_list):
+                raise ValueError("weights must be None or one weight vector per trajectory")
+        if not traj_list:
+            return []
+
+        prepped = [self._prep_positions(t) for t in traj_list]
+        lengths = [int(t.shape[0]) for t in prepped]
+        pred = self.predict_uncertainty(torch.cat(prepped, dim=0))
+        domain_risk = self.domain_support_score(pred.positions) if self.domain_support else None
+
+        scores: list[TrajectoryScore] = []
+        offset = 0
+        for n, w in zip(lengths, weight_list, strict=True):
+            sl = slice(offset, offset + n)
+            offset += n
+            block = UncertaintyPrediction(
+                positions=pred.positions[sl],
+                radius=pred.radius[sl],
+                mean_error=pred.mean_error[sl],
+                std_components=pred.std_components[sl],
+                sigma=pred.sigma[sl],
+                epistemic_sigma=pred.epistemic_sigma[sl],
+                mean_error_magnitude=pred.mean_error_magnitude[sl],
+                expected_error=pred.expected_error[sl],
+                epistemic_fraction=pred.epistemic_fraction[sl],
+                risk_score=pred.risk_score[sl],
+            )
+            scores.append(
+                self._score_profile(
+                    block,
+                    domain_risk=domain_risk[sl] if domain_risk is not None else None,
+                    scoring=scoring,
+                    weights=w,
+                )
+            )
+        return scores
 
     # ------------------------------------------------------------------ threshold calibration
     def calibrate_pointwise_expected_error_threshold(
@@ -773,18 +993,35 @@ class VESPUQPlugin:
         self._require_fitted()
         positions = self._prep_positions(positions)
         error = self._prep_positions(error)
-        op = self._operator(positions)
+        n = positions.shape[0]
         radius = torch.linalg.norm(positions, dim=-1)
         row_radii = radius.repeat(3)
-        pred = self._predict_rows(op, row_radii)
-        mean, std = pred["mean"], pred["std"]
-        epistemic_std = torch.sqrt(pred["epistemic_variance"].clamp_min(0.0))
+
+        # One operator build per query chunk feeds BOTH the row-level prediction and the 3x3
+        # covariance (the operator is the expensive part). Chunk row outputs come back in
+        # [x_blk, y_blk, z_blk] order and are reassembled into the full-set
+        # [x-all, y-all, z-all] row order via the (3, n_blk) reshape.
+        mean_parts, std_parts, epi_parts, cov_parts, mean3_parts = [], [], [], [], []
+        for a, b in self._query_chunks(n):
+            pos_blk = positions[a:b]
+            op_blk = self._operator(pos_blk)
+            rows = self._predict_rows(op_blk, radius[a:b].repeat(3))
+            nb = pos_blk.shape[0]
+            mean_parts.append(rows["mean"].reshape(3, nb))
+            std_parts.append(rows["std"].reshape(3, nb))
+            epi_parts.append(rows["epistemic_variance"].reshape(3, nb))
+            cov_blk = self._predict_covariance_block(pos_blk, operator=op_blk)
+            cov_parts.append(cov_blk.covariance)
+            mean3_parts.append(cov_blk.mean_error)
+        mean = torch.cat(mean_parts, dim=1).reshape(-1)
+        std = torch.cat(std_parts, dim=1).reshape(-1)
+        epistemic_std = torch.sqrt(torch.cat(epi_parts, dim=1).reshape(-1).clamp_min(0.0))
+        covariance = torch.cat(cov_parts, dim=0)
         target = _flatten_acc(error)
 
         # vector (ellipsoid) calibration uses the full 3x3 predictive covariance per point and
         # the predictive RESIDUAL (observed error minus the posterior-mean error prediction).
-        cov_pred = self.predict_covariance_3x3(positions)
-        residual_vec = error - cov_pred.mean_error
+        residual_vec = error - torch.cat(mean3_parts, dim=0)
         point_radius = radius
         point_mask_all = torch.ones_like(point_radius, dtype=torch.bool)
 
@@ -799,7 +1036,7 @@ class VESPUQPlugin:
             m["mean_radius"] = float(torch.mean(row_radii[row_mask]).detach().cpu())
             if int(point_mask.sum()) >= 10:
                 m.update(
-                    vector_calibration_metrics(residual_vec[point_mask], cov_pred.covariance[point_mask])
+                    vector_calibration_metrics(residual_vec[point_mask], covariance[point_mask])
                 )
             return m
 
@@ -833,3 +1070,155 @@ class VESPUQPlugin:
             shell_ids=self.sources.shell_ids,
             sigma=self.posterior.mean,
         )
+
+    # ------------------------------------------------------------------ persistence
+    def state_dict(self) -> dict:
+        """Serializable snapshot of the FITTED plugin.
+
+        The payload is ``torch.load(..., weights_only=True)``-safe: nested dicts/lists of CPU
+        tensors and Python primitives only. It captures everything prediction-relevant --
+        source geometry, kernel/risk/domain options, the linear-Gaussian posterior, the
+        altitude noise law, the domain-support calibration geometry, and ``fit_info`` -- so a
+        loaded plugin predicts/scores identically without refitting. Use :meth:`save` /
+        :meth:`load` for files.
+        """
+
+        self._require_fitted()
+
+        def _cpu(t: torch.Tensor | None) -> torch.Tensor | None:
+            return t.detach().cpu() if t is not None else None
+
+        return {
+            "format": PLUGIN_STATE_FORMAT,
+            "version": PLUGIN_STATE_VERSION,
+            "sources": {
+                "positions": _cpu(self.sources.positions),
+                "weights": _cpu(self.sources.weights),
+                "shell_ids": _cpu(self.sources.shell_ids),
+                "shell_radii": [float(r) for r in self.sources.shell_radii],
+            },
+            "options": {
+                "eps": self.eps,
+                "acceleration_sign": self.acceleration_sign,
+                "source_chunk_size": self.source_chunk_size,
+                "query_chunk_size": self.query_chunk_size,
+                "reg_method": self.reg_method,
+                "lambda_l2": self.lambda_l2,
+                "noise_model": self.noise_model,
+                "covariance_mode": self.covariance_mode,
+                "lowrank_rank": self.lowrank_rank,
+                "val_fraction": self.val_fraction,
+                "low_altitude_radius": self.low_altitude_radius,
+                "risk_scoring": self.risk_scoring,
+                "sigma_threshold": self.sigma_threshold,
+                "altitude_reference_h": self.altitude_reference_h,
+                "domain_support": self.domain_support,
+                "domain_k": self.domain_k,
+                "domain_weight": self.domain_weight,
+                "domain_distance_weight": self.domain_distance_weight,
+                "domain_radial_weight": self.domain_radial_weight,
+                "domain_angular_weight": self.domain_angular_weight,
+                "domain_backend": self.domain_backend,
+                "seed": self.seed,
+                "dtype": "float64" if self.dtype == torch.float64 else "float32",
+            },
+            "posterior": {
+                "mean": _cpu(self.posterior.mean),
+                "cov": _cpu(self.posterior.cov),
+                "noise_var": float(self.posterior.noise_var),
+                "lambda_l2": self.posterior.lambda_l2,
+            },
+            "altitude_noise": (
+                {
+                    "log_a": self.altitude_noise.log_a,
+                    "b": self.altitude_noise.b,
+                    "h_floor": self.altitude_noise.h_floor,
+                }
+                if self.altitude_noise is not None
+                else None
+            ),
+            "domain_state": {
+                "train_positions": _cpu(self.train_positions),
+                "train_radii": _cpu(self.train_radii),
+                "val_positions": _cpu(self.val_positions),
+                "val_radii": _cpu(self.val_radii),
+                "domain_scale": self._domain_scale,
+                "domain_scale_k": self._domain_scale_k,
+                "domain_angular_scale": self._domain_angular_scale,
+            },
+            "fit_info": dict(self.fit_info),
+            # JSON-safe passthrough block (decision policy / provenance from the training run).
+            "user_metadata": json_safe(dict(self.user_metadata)),
+        }
+
+    def save(self, path: str | Path, *, extra_metadata: dict | None = None) -> None:
+        """Persist the fitted plugin to ``path`` (atomic write; conventional suffix ``.pt``).
+
+        ``extra_metadata`` (JSON-safe dict) is merged into :attr:`user_metadata` before saving --
+        the conventional place for the training run's decision policy (scoring mode, resolved
+        threshold + provenance) and dataset provenance, so the model artifact is self-describing.
+        """
+
+        if extra_metadata:
+            self.user_metadata = {**self.user_metadata, **json_safe(dict(extra_metadata))}
+        atomic_torch_save(path, self.state_dict())
+
+    @classmethod
+    def from_state_dict(cls, state: dict, *, device: torch.device | str = "cpu") -> VESPUQPlugin:
+        """Rebuild a fitted plugin from :meth:`state_dict` output (version-checked)."""
+
+        if not isinstance(state, dict) or state.get("format") != PLUGIN_STATE_FORMAT:
+            raise ValueError("not a serialized VESPUQPlugin state (missing format tag)")
+        version = int(state.get("version", -1))
+        if version < 1 or version > PLUGIN_STATE_VERSION:
+            raise ValueError(
+                f"unsupported plugin state version {version} (supported: 1..{PLUGIN_STATE_VERSION})"
+            )
+
+        options = dict(state["options"])
+        dtype = torch.float64 if str(options.pop("dtype", "float64")) == "float64" else torch.float32
+        src = state["sources"]
+        sources = SourceSet(
+            positions=src["positions"].to(dtype),
+            weights=src["weights"].to(dtype),
+            shell_ids=src["shell_ids"],
+            shell_radii=tuple(float(r) for r in src["shell_radii"]),
+        )
+        plugin = cls(sources, dtype=dtype, device=device, **options)
+
+        def _dev(t: torch.Tensor | None) -> torch.Tensor | None:
+            return t.to(device=plugin.device, dtype=dtype) if t is not None else None
+
+        post = state["posterior"]
+        plugin.posterior = LinearGaussianPosterior(
+            mean=_dev(post["mean"]),
+            cov=_dev(post["cov"]),
+            noise_var=float(post["noise_var"]),
+            lambda_l2=post["lambda_l2"],
+        )
+        noise = state.get("altitude_noise")
+        plugin.altitude_noise = (
+            AltitudeNoiseModel(
+                log_a=float(noise["log_a"]), b=float(noise["b"]), h_floor=float(noise["h_floor"])
+            )
+            if noise is not None
+            else None
+        )
+        domain = state.get("domain_state", {})
+        plugin.train_positions = _dev(domain.get("train_positions"))
+        plugin.train_radii = _dev(domain.get("train_radii"))
+        plugin.val_positions = _dev(domain.get("val_positions"))
+        plugin.val_radii = _dev(domain.get("val_radii"))
+        plugin._domain_scale = domain.get("domain_scale")
+        plugin._domain_scale_k = domain.get("domain_scale_k")
+        plugin._domain_angular_scale = domain.get("domain_angular_scale")
+        plugin.fit_info = dict(state.get("fit_info", {}))
+        plugin.user_metadata = dict(state.get("user_metadata", {}))
+        return plugin
+
+    @classmethod
+    def load(cls, path: str | Path, *, device: torch.device | str = "cpu") -> VESPUQPlugin:
+        """Load a plugin saved by :meth:`save` (safe ``weights_only`` load, version-checked)."""
+
+        state = torch.load(Path(path), map_location="cpu", weights_only=True)
+        return cls.from_state_dict(state, device=device)

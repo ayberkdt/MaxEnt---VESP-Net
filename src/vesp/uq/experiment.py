@@ -173,7 +173,13 @@ def _build_trajectories(screen_cfg: dict, *, seed: int, dtype: torch.dtype, conf
     raise ValueError("uq.screening.trajectory_source must be 'generated' or 'csv'")
 
 
-def run_vespuq(config: dict) -> dict:
+def run_vespuq(config: dict, *, return_plugin: bool = False):
+    """Run the fit / calibrate / score / screen pipeline; return the report dict.
+
+    ``return_plugin=True`` returns ``(report, plugin)`` instead, so callers (e.g. the CLI
+    driver) can persist the fitted plugin via :meth:`VESPUQPlugin.save` without refitting.
+    """
+
     from vesp.common.config import get_dtype
 
     dtype = get_dtype(config)
@@ -323,4 +329,6 @@ def run_vespuq(config: dict) -> dict:
     report["summary"] = build_summary(report)
     # tables attached for CSV emission (not part of the JSON report body)
     report["_tables"] = build_tables(scores, screening, true_error, flagged_set)
+    if return_plugin:
+        return report, plugin
     return report

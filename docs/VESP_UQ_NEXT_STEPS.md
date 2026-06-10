@@ -151,14 +151,97 @@ Open gaps found while surveying the code (evidence in parentheses):
 - **Acceptance:** met — benchmark runs on a synthetic reference; doc reports accuracy **and** cost
   with honest caveats; tests cover the RHS hook's operator consistency.
 
+### N7 — Performance + persistence hardening — **DONE**
+
+- **Why:** a survey of the prediction/screening hot path found (a) `score_ensemble` looped
+  per trajectory — for a 512-orbit screen that meant 512 separate operator builds, 512 small
+  posterior matmuls and 512 separate k-NN `cdist` calls; (b) `evaluate_calibration` built the
+  dense operator **twice** for the same held-out positions (once directly, once inside
+  `predict_covariance_3x3`); (c) `build_dense_operator` materialized `(Q, S, 3)` temporaries and
+  paid two concatenation copies per build; (d) no prediction path was chunked over queries, so a
+  large position set materialized the full `(3N, n_sources)` operator at once; and (e) the fitted
+  layer had **no persistence** — every script refit from scratch, blocking fit-once/reuse
+  workflows (screening, `CorrectedForceField`, the MC/STM propagators).
+- **Done:**
+  - **Batched ensemble scoring**: `score_ensemble` concatenates the ensemble, runs ONE
+    query-chunked `predict_uncertainty` + ONE batched domain-support pass, then splits the
+    profile per trajectory. Per-trajectory numbers are identical to the sequential path
+    (equivalence locked by `tests/test_uq_batched_scoring.py`).
+  - **Query chunking**: new `uq.query_chunk_size` knob (default 8192 positions/block) chunks
+    `predict_uncertainty` / `predict_covariance_3x3` / `evaluate_calibration`, bounding operator
+    memory on large query sets.
+  - **Single operator build in calibration**: `evaluate_calibration` now feeds the row-level
+    prediction AND the `3x3` covariance from one operator per chunk.
+  - **Lean operator builder**: `build_dense_operator` writes per-axis `(Q, C)` blocks straight
+    into a preallocated output — no `(Q, S, 3)` temporaries, no `torch.cat` copies. The
+    arithmetic order is unchanged, so outputs are **bitwise identical** (verified across
+    chunked/unchunked, potential/acceleration, eps/sign variants); measured **~2.1×** faster on a
+    screening-shaped build (8192 pts × 512 sources: 199 → 95 ms).
+  - **Net effect** on the 512-orbit × 64-point screening profile (n_sources = 512, exact
+    covariance, domain support on, CPU): **84.7 → 49.7 µs per output point (~1.7×)** with
+    identical risk scores.
+  - **Persistence**: `VESPUQPlugin.state_dict()/save()/load()/from_state_dict()` — atomic,
+    version-tagged, `torch.load(weights_only=True)`-safe payload carrying the posterior, altitude
+    noise law, domain-support geometry, options and `fit_info`. `output.save_model: true` makes
+    the main run write `vespuq_plugin.pt` (checksummed into `run_manifest.json`);
+    `run_vespuq(config, return_plugin=True)` exposes the fitted plugin to callers. Round-trip
+    equality locked by `tests/test_uq_plugin_persistence.py` (predictions, covariances,
+    domain-support scores, trajectory scores, and `CorrectedForceField` corrections all match the
+    pre-save plugin exactly).
+- **Acceptance:** met — full suite green (17 new tests: equivalence, chunking, persistence
+  round-trip, `save_model` artifact), `ruff check` clean, smoke artifacts unchanged in shape; no
+  behavior change anywhere (bitwise-identical operator, float-identical scores).
+
+### N8 — Train/serve separation + model lifecycle — **DONE**
+
+- **Why:** the system had exactly one operating mode — every invocation refit the layer from
+  calibration data before screening. Industrial UQ deployments separate **training** (produce a
+  versioned model artifact + decision policy + provenance) from **serving** (load the artifact,
+  score new ensembles repeatedly, never refit). N7's persistence made this possible; N8 built the
+  lifecycle on it.
+- **Done:**
+  - **Input provenance**: `write_run_manifest(..., inputs=...)` — manifests now checksum the
+    files a run CONSUMED (dataset CSV, trajectory CSV, model artifact) with the same SHA-256 +
+    byte-size treatment as outputs; `vesp.uq.run` and the serve driver both record them.
+  - **Decision policy + model card packaged with the model**: `VESPUQPlugin.save(...,
+    extra_metadata=...)` / `plugin.user_metadata` (JSON-safe, `weights_only`-load safe,
+    round-trips). The training driver embeds the resolved scoring mode, threshold (+ source /
+    quantile / physical value), fallback rerun fraction, time weighting, units, and dataset
+    SHA-256; `--save-model` CLI flag added. A model card (`vespuq_plugin_card.md`, built by
+    `vesp.uq.reporting.build_model_card`) is written next to the artifact: intended use,
+    provenance, fit + held-out calibration table, decision policy, and the claims-policy scope
+    boundaries — card and model cannot drift apart because both come from the same run report.
+  - **Serve driver**: `python -m vesp.uq.screen --model vespuq_plugin.pt
+    (--trajectories ens.csv | --config cfg.yaml) --out dir` — loads the persisted layer, scores
+    the ensemble (batched, no refit), applies the packaged decision policy with explicit
+    precedence (CLI > model > default fraction), **refuses to apply a packaged threshold to a
+    mismatched score scale**, uses the CSV's own residual force error as the only serve-time
+    diagnostic (no invented oracle), and writes `screening_report.{json,md}` + score CSVs + a
+    manifest with model/input checksums. Serve scores are row-for-row identical to the training
+    driver on the same ensemble (locked by `tests/test_uq_screen_cli.py`).
+  - **Exact sequential update**: `VESPUQPlugin.update_error(positions, error,
+    [val_positions, val_error])` — closed-form conjugate update; with the same `lambda` and noise
+    floor it **equals the batch refit on the concatenated data exactly** (pinned to fp precision
+    by `tests/test_uq_sequential_update.py`, including two-updates-equal-one-batch). Fresh
+    held-out data recalibrates the noise floor + altitude law exactly as `fit_error`; domain
+    geometry extends; `fit_info` records `n_updates`. The L-curve is deliberately NOT re-run
+    (documented in `docs/VESP_UQ_LIMITATIONS.md` with a re-validation warning).
+- **Acceptance:** met — 16 new tests (9 serve CLI + 7 sequential update) plus card/manifest
+  assertions; CI smoke now exercises the full train→serve chain
+  (`vesp.uq.run --save-model` → `vesp.uq.screen`); `ruff check` clean; full suite green.
+
 ## Recommended order
 
-`N0 → ~~N1~~ → ~~N2~~ → ~~N3~~ → ~~N4~~ → ~~N5~~ → ~~N6~~`. **All planned items (N1–N6) are done.**
-Rationale: commit first (N0); then the low-risk, high-value reproducibility/quality items (N1, N2)
-that harden everything already built; then the propagation capability as a documented, tested
-deliverable (N3) with script-level schema tests (N4); N5 bounds the external ST-LRPS subsystem
-honestly. N6 — the one new-research item — was done last, on explicit request, as an **exploratory**
-force-model correction reporting measured accuracy **and** cost with honest caveats.
+`N0 → ~~N1~~ → ~~N2~~ → ~~N3~~ → ~~N4~~ → ~~N5~~ → ~~N6~~ → ~~N7~~ → ~~N8~~`. **All planned
+items (N1–N8) are done.** Rationale: commit first (N0); then the low-risk, high-value
+reproducibility/quality items (N1, N2) that harden everything already built; then the propagation
+capability as a documented, tested deliverable (N3) with script-level schema tests (N4); N5
+bounds the external ST-LRPS subsystem honestly. N6 — the one new-research item — was done last,
+on explicit request, as an **exploratory** force-model correction reporting measured accuracy
+**and** cost with honest caveats. N7 hardened the layer's hot path and added fit-once/reuse
+persistence without changing any reported number. N8 turned the layer into a deployable model
+lifecycle: train/serve separation, packaged decision policy + model card, input provenance, and
+an exact sequential update.
 
 ## Out of scope (and why)
 

@@ -131,39 +131,52 @@ def build_dense_operator(
 
     This is useful for small-to-medium ridge/Tikhonov prototypes. It should not
     be used for very large source/query counts.
+
+    Blocks are written straight into a preallocated output with per-axis ``(Q, C)``
+    intermediates (no ``(Q, C, 3)`` temporaries, no concatenation copies). The arithmetic
+    order matches the naive broadcast formulation exactly, so results are bitwise identical.
     """
 
     if not include_potential and not include_acceleration:
         raise ValueError("at least one of potential or acceleration must be included")
 
+    n_query = query_points.shape[0]
     n_sources = source_positions.shape[0]
     chunk = source_chunk_size or n_sources
-    blocks = []
     eps2 = float(softening) ** 2
+    sign = float(acceleration_sign)
+    tiny = torch.finfo(query_points.dtype).eps
+
+    n_pot = n_query if include_potential else 0
+    n_rows = n_pot + (3 * n_query if include_acceleration else 0)
+    out = torch.empty(n_rows, n_sources, dtype=query_points.dtype, device=query_points.device)
+
+    qx = query_points[:, 0].unsqueeze(1)
+    qy = query_points[:, 1].unsqueeze(1)
+    qz = query_points[:, 2].unsqueeze(1)
 
     for start in range(0, n_sources, chunk):
         end = min(start + chunk, n_sources)
         s = source_positions[start:end]
-        weights = source_weights[start:end]
+        weights = source_weights[start:end].unsqueeze(0)
 
-        diff = s.unsqueeze(0) - query_points.unsqueeze(1)
-        r2 = torch.sum(diff * diff, dim=-1)
+        dx = s[:, 0].unsqueeze(0) - qx
+        dy = s[:, 1].unsqueeze(0) - qy
+        dz = s[:, 2].unsqueeze(0) - qz
+        r2 = dx * dx + dy * dy + dz * dz
         if eps2:
             r2 = r2 + eps2
-        inv_r = torch.rsqrt(torch.clamp(r2, min=torch.finfo(query_points.dtype).eps))
+        inv_r = torch.rsqrt(torch.clamp(r2, min=tiny))
 
-        rows = []
         if include_potential:
-            rows.append(inv_r * weights.unsqueeze(0))
+            out[:n_query, start:end] = inv_r * weights
         if include_acceleration:
-            inv_r3 = inv_r * inv_r * inv_r
-            accel_block = float(acceleration_sign) * diff * (weights.unsqueeze(0) * inv_r3).unsqueeze(-1)
-            rows.extend([accel_block[:, :, axis] for axis in range(3)])
+            w_inv_r3 = weights * (inv_r * inv_r * inv_r)
+            out[n_pot : n_pot + n_query, start:end] = sign * dx * w_inv_r3
+            out[n_pot + n_query : n_pot + 2 * n_query, start:end] = sign * dy * w_inv_r3
+            out[n_pot + 2 * n_query :, start:end] = sign * dz * w_inv_r3
 
-        block = torch.cat([row for row in rows], dim=0)
-        blocks.append(block)
-
-    return torch.cat(blocks, dim=1)
+    return out
 
 
 def stack_observations(

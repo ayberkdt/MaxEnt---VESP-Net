@@ -110,3 +110,5 @@ output:
   output_dir: outputs
   run_name: vespuq_real_lunar
   save_plots: false
+  save_model: false             # true -> persist the fitted layer as vespuq_plugin.pt
+  #                             # (reload with VESPUQPlugin.load(...); no refit needed)

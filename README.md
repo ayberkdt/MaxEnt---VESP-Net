@@ -112,6 +112,47 @@ is calibrated, altitude-aware error bars and the trajectory screen they enable. 
 [`docs/VESP_UQ_IAC_PLAN.md`](docs/VESP_UQ_IAC_PLAN.md) and
 [`docs/VESP_UQ_LIMITATIONS.md`](docs/VESP_UQ_LIMITATIONS.md) for the full scope and claim boundaries.
 
+### Train/serve separation: persist once, screen repeatedly
+
+A fitted plugin can be saved and reloaded **without refitting** — the round trip preserves the
+posterior, the altitude noise law, the domain-support geometry, and `fit_info`, so a loaded layer
+predicts/scores identically (locked by `tests/test_uq_plugin_persistence.py`):
+
+```python
+plugin.save("vespuq_plugin.pt")                  # atomic, versioned, weights_only-safe payload
+plugin = VESPUQPlugin.load("vespuq_plugin.pt")   # ready for predict / score / CorrectedForceField
+```
+
+The two drivers split the lifecycle the way an operational pipeline does:
+
+```text
+# TRAIN: fit from calibration data; package the model + decision policy + model card
+python -m vesp.uq.run --config configs/vespuq/vespuq_smoke.yaml --save-model
+
+# SERVE: screen new trajectory ensembles with the persisted model -- no refitting
+python -m vesp.uq.screen --model outputs/vespuq_smoke/vespuq_plugin.pt \
+    --trajectories my_surrogate_orbits.csv --out outputs/screen_run
+```
+
+`--save-model` (or `output.save_model: true`) embeds the training run's **decision policy**
+(scoring mode, resolved threshold + provenance, fallback rerun fraction, units) in the artifact
+and writes a human-readable **model card** (`vespuq_plugin_card.md`) next to it. The serve driver
+applies that packaged policy unless explicitly overridden (`--threshold`, `--rerun-fraction`,
+`--scoring`), refuses to apply a packaged threshold to a different score scale, and writes the
+same provenance-checked artifact set — `run_manifest.json` now also checksums the **inputs**
+(model file, trajectory/dataset CSVs), so results trace to exact input bytes.
+
+A fitted layer can also be **updated in place** with new reference samples — exactly:
+`plugin.update_error(positions, error)` conditions the posterior in closed form and equals the
+batch refit on the concatenated data (same `lambda`/noise; pass fresh `val_positions`/`val_error`
+to recalibrate the noise law honestly). See `docs/VESP_UQ_LIMITATIONS.md` for what an update
+deliberately does **not** re-select.
+
+Prediction paths are query-chunked (`uq.query_chunk_size`, default 8192 positions per dense
+block) and `score_ensemble` scores the whole trajectory ensemble in batched passes — bounded
+memory on large ensembles, identical per-trajectory numbers to a `score_trajectory` loop
+(locked by `tests/test_uq_batched_scoring.py`).
+
 ### VESP-UQ scoring modes
 
 `uq.risk.scoring` selects how the per-point risk profile is aggregated into one trajectory

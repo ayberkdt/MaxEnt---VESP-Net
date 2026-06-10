@@ -9,13 +9,13 @@ import os
 import platform
 import sys
 import tempfile
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
 import torch
-
 
 RUN_MANIFEST_SCHEMA_VERSION = "vesp_run_manifest_v1"
 
@@ -71,12 +71,12 @@ def json_safe(value: Any) -> Any:
         return {str(k): json_safe(v) for k, v in value.items()}
     if isinstance(value, (list, tuple, set)):
         return [json_safe(v) for v in value]
-    if hasattr(value, "detach") and callable(getattr(value, "detach")):
+    if hasattr(value, "detach") and callable(value.detach):
         try:
             return value.detach().cpu().tolist()
         except Exception:
             return str(value)
-    if hasattr(value, "item") and callable(getattr(value, "item")):
+    if hasattr(value, "item") and callable(value.item):
         try:
             return value.item()
         except Exception:
@@ -138,28 +138,40 @@ def compute_file_sha256(path: str | Path) -> str:
     return digest.hexdigest()
 
 
+def _checksum_payload(files: Mapping[str, str | Path] | None) -> dict[str, dict[str, Any]]:
+    """Per-file provenance entries: path + SHA-256 + byte size (or ``missing: true``)."""
+
+    payload: dict[str, dict[str, Any]] = {}
+    for name, file_path in (files or {}).items():
+        p = Path(file_path)
+        if p.exists() and p.is_file():
+            payload[str(name)] = {
+                "path": str(p),
+                "sha256": compute_file_sha256(p),
+                "bytes": p.stat().st_size,
+            }
+        else:
+            payload[str(name)] = {"path": str(p), "missing": True}
+    return payload
+
+
 def write_run_manifest(
     run_dir: str | Path,
     *,
     config: Mapping[str, Any] | None = None,
     metrics: Mapping[str, Any] | None = None,
     artifacts: Mapping[str, str | Path] | None = None,
+    inputs: Mapping[str, str | Path] | None = None,
 ) -> Path:
-    """Write a compact provenance manifest for a completed run."""
+    """Write a compact provenance manifest for a completed run.
+
+    ``artifacts`` are the files the run PRODUCED; ``inputs`` are the files it CONSUMED
+    (datasets, trajectory CSVs, saved models). Both get the same path + SHA-256 + byte-size
+    treatment, so a result can be traced to the exact inputs as well as verified outputs.
+    The ``inputs`` key is additive (older manifests simply lack it).
+    """
 
     layout = ensure_run_layout(run_dir)
-    artifact_payload: dict[str, dict[str, Any]] = {}
-    for name, artifact_path in (artifacts or {}).items():
-        p = Path(artifact_path)
-        if p.exists() and p.is_file():
-            artifact_payload[str(name)] = {
-                "path": str(p),
-                "sha256": compute_file_sha256(p),
-                "bytes": p.stat().st_size,
-            }
-        else:
-            artifact_payload[str(name)] = {"path": str(p), "missing": True}
-
     manifest = {
         "schema_version": RUN_MANIFEST_SCHEMA_VERSION,
         "created_at_utc": utc_now_iso(),
@@ -167,7 +179,8 @@ def write_run_manifest(
         "platform": platform.platform(),
         "config": dict(config or {}),
         "metrics": dict(metrics or {}),
-        "artifacts": artifact_payload,
+        "artifacts": _checksum_payload(artifacts),
+        "inputs": _checksum_payload(inputs),
     }
     atomic_write_json(layout.run_manifest_json, manifest)
     return layout.run_manifest_json

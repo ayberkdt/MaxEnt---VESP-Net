@@ -388,3 +388,98 @@ def _iac_summary_md(report: dict) -> list[str]:
         "uncertainty-calibration layer at the acceleration interface.",
         "",
     ]
+
+
+def build_model_card(report: dict, *, model_filename: str, metadata: dict) -> str:
+    """Model card for a persisted fitted layer (written next to ``vespuq_plugin.pt``).
+
+    Industrial-registry practice: the saved model ships with a human-readable card stating what
+    it is, what data and decision policy produced it, its held-out calibration, and -- in this
+    project's claims-policy spirit -- what it must NOT be used to claim. All facts come from the
+    training run's ``report`` and the metadata embedded in the artifact, so card and model cannot
+    drift apart.
+    """
+
+    fit = report["fit"]
+    cal = report["experiment_1_calibration"]
+    screen = report["experiment_3_screening"]
+    units = report.get("units", {})
+    policy = metadata.get("decision_policy", {})
+    provenance = metadata.get("provenance", {})
+
+    lines = [
+        f"# Model card - `{model_filename}`",
+        "",
+        "**VESP-UQ fitted equivalent-source force-error uncertainty layer.** Surrogate-agnostic: "
+        "wraps any residual-gravity model sampled as `e_a(x) = a_reference(x) - a_surrogate(x)`.",
+        "",
+        "## Intended use",
+        "",
+        "- Calibrated, altitude-aware predictive uncertainty over a surrogate's force-model error.",
+        "- Trajectory force-risk / OOD screening (rerun prioritization or absolute budgets) via "
+        "`python -m vesp.uq.screen --model <this file>`.",
+        "- NOT a deterministic accuracy improver, position-error predictor, density model, or "
+        "operational orbit-covariance product (see `docs/VESP_UQ_LIMITATIONS.md`).",
+        "",
+        "## Provenance",
+        "",
+        f"- created (UTC): {provenance.get('created_at_utc', 'n/a')}",
+        f"- training dataset: `{provenance.get('dataset', report.get('dataset', 'n/a'))}`"
+        + (f" (sha256 `{provenance['dataset_sha256']}`)" if provenance.get("dataset_sha256") else ""),
+        f"- samples: {fit.get('n_train', 'n/a')} train / {fit.get('n_val', 'n/a')} held-out val",
+        f"- state format: `vesp.uq.plugin` v{metadata.get('state_version', 1)}",
+        "",
+        "## Fit",
+        "",
+        f"- sources: {fit.get('n_sources')}  |  regularization: {fit.get('reg_method')} "
+        f"(lambda_l2 = {fmt(fit.get('lambda_l2'))})  |  noise model: {fit.get('noise_model')}",
+        f"- global noise std: {fmt(fit.get('noise_std'), '.3e')}"
+        + (
+            f"  |  altitude noise sigma^2(h) = a*h^(-b): a = {fmt(fit.get('altitude_noise_a'), '.3e')}, "
+            f"b = {fmt(fit.get('altitude_noise_b'), '.3f')}"
+            if fit.get("altitude_noise_b") is not None
+            else ""
+        ),
+        f"- domain support: {'on' if fit.get('domain_support_enabled') else 'off'} "
+        f"(k = {fit.get('domain_k')}, backend = {fit.get('domain_backend')})",
+        "",
+        "## Held-out calibration (training run)",
+        "",
+        "| band | n | z_std | picp_90 | ellipsoid_picp_90 |",
+        "| --- | ---: | ---: | ---: | ---: |",
+    ]
+    for name in ("all", "low", "mid", "high"):
+        m = cal.get(name)
+        if not m:
+            continue
+        lines.append(
+            f"| {name} | {m.get('n', '')} | {fmt(m.get('z_std'), '.2f')} | "
+            f"{fmt(m.get('picp_90'), '.2f')} | {fmt(m.get('ellipsoid_picp_90'), '.2f')} |"
+        )
+    lines += [
+        "",
+        "## Decision policy (packaged with the model)",
+        "",
+        f"- scoring: `{policy.get('scoring', screen.get('scoring'))}` "
+        f"(canonical `{policy.get('scoring_canonical', screen.get('scoring_canonical'))}`, "
+        f"scale `{policy.get('scoring_scale', screen.get('scoring_scale'))}`)",
+        f"- threshold: {fmt(policy.get('threshold'), '.4e') if policy.get('threshold') is not None else 'none (fraction mode)'}"
+        + (f"  |  source: {policy.get('threshold_source')}" if policy.get("threshold_source") else ""),
+        f"- fallback rerun fraction: {fmt(policy.get('rerun_fraction'), '.2f')} "
+        f"(policy `{policy.get('fraction_policy', 'topk')}`)",
+        f"- time weighting: `{policy.get('time_weighting', 'none')}`",
+        f"- risk-score units: `{units.get('risk_score_units', 'model_normalized_accel')}`"
+        + (
+            f"  |  physical scale: 1 model unit = {fmt(units.get('acceleration_scale_m_s2'), '.3e')} m/s^2"
+            if units.get("physical_conversion_available")
+            else "  |  physical conversion: unavailable (model-normalized only)"
+        ),
+        "",
+        "## Scope boundaries",
+        "",
+        "Binding claims policy: `docs/SCIENTIFIC_CLAIMS.md`; scope limits: "
+        "`docs/VESP_UQ_LIMITATIONS.md`. The posterior mean equals the ridge point estimate -- "
+        "this layer never improves deterministic accuracy and never predicts position error.",
+        "",
+    ]
+    return "\n".join(lines)

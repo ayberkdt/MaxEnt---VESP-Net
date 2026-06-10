@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
+import warnings
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
-import warnings
 
 import torch
 import yaml
-
 
 DEFAULT_CONFIG: dict[str, Any] = {
     "seed": 42,

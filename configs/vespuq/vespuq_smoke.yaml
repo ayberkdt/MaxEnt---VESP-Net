@@ -45,6 +45,8 @@ uq:
     method: lcurve
   noise_model: heteroscedastic
   covariance_mode: exact
+  # query_chunk_size: 8192      # positions per dense prediction block (null = no chunking);
+  #                             # bounds operator memory for large query sets / ensembles
   val_fraction: 0.3
   risk:
     # Use supervisor_rel for relative rerun prioritization.
@@ -124,3 +126,5 @@ output:
   output_dir: outputs
   run_name: vespuq_smoke
   save_plots: false
+  save_model: false             # true -> persist the fitted layer as vespuq_plugin.pt
+  #                             # (reload with VESPUQPlugin.load(...); no refit needed)
