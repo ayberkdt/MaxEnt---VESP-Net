@@ -17,7 +17,6 @@ from pathlib import Path
 from typing import Iterable
 
 import numpy as np
-from scipy.special import gammaln, lpmv
 
 from vesp.common.artifacts import atomic_write_json
 from vesp.data.dataset import write_dataset_metadata
@@ -115,19 +114,59 @@ def read_pds_sha(
     )
 
 
-def fully_normalized_legendre(degree: int, order: int, sin_lat: np.ndarray) -> np.ndarray:
-    """Geodesy 4pi fully normalized associated Legendre function.
+def build_legendre_coeffs(n_max: int) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    diag = np.zeros(n_max + 1, dtype=np.float64)
+    subdiag = np.zeros(n_max + 1, dtype=np.float64)
+    A = np.zeros((n_max + 1, n_max + 1), dtype=np.float64)
+    B = np.zeros((n_max + 1, n_max + 1), dtype=np.float64)
 
-    SciPy's ``lpmv`` includes the Condon-Shortley phase. Geodesy gravity
-    coefficients conventionally omit it, so the ``(-1)^m`` factor removes it.
-    """
+    if n_max >= 1:
+        n = np.arange(1, n_max + 1, dtype=np.float64)
+        diag[1:] = np.sqrt((2.0 * n + 1.0) / (2.0 * n))
+        subdiag[1:] = np.sqrt(2.0 * n + 1.0)
 
-    raw = lpmv(order, degree, sin_lat)
-    raw = ((-1.0) ** order) * raw
-    delta = 1.0 if order == 0 else 0.0
-    log_factor = math.log(2.0 - delta) + math.log(2.0 * degree + 1.0)
-    log_factor += gammaln(degree - order + 1.0) - gammaln(degree + order + 1.0)
-    return math.sqrt(math.exp(log_factor)) * raw
+    for n_int in range(2, n_max + 1):
+        n = float(n_int)
+        m = np.arange(0.0, n - 1.0, dtype=np.float64)
+        A[n_int, : n_int - 1] = np.sqrt(((2.0 * n - 1.0) * (2.0 * n + 1.0)) / ((n - m) * (n + m)))
+        B[n_int, : n_int - 1] = np.sqrt(
+            ((2.0 * n + 1.0) * (n - m - 1.0) * (n + m - 1.0)) / ((2.0 * n - 3.0) * (n + m) * (n - m))
+        )
+
+    # VESP uses geodesy convention: no Condon-Shortley phase (-1)^m
+    scale_m = np.ones(n_max + 1, dtype=np.float64)
+    if n_max >= 1:
+        scale_m[1:] *= math.sqrt(2.0)
+
+    return diag, subdiag, A, B, scale_m
+
+
+def compute_normalized_legendre_matrix(degree_max: int, sin_lat: np.ndarray) -> np.ndarray:
+    N = int(degree_max)
+    K = sin_lat.shape[0]
+    
+    # cos_lat is strictly non-negative because -pi/2 <= lat <= pi/2
+    cos_lat = np.sqrt(1.0 - sin_lat**2)
+    
+    diag, subdiag, A, B, scale_m = build_legendre_coeffs(N)
+    
+    P = np.zeros((N + 1, N + 1, K), dtype=np.float64)
+    P[0, 0, :] = 1.0
+    
+    for n in range(1, N + 1):
+        # Diagonal
+        P[n, n, :] = diag[n] * cos_lat * P[n - 1, n - 1, :]
+        # Sub-diagonal
+        P[n, n - 1, :] = subdiag[n] * sin_lat * P[n - 1, n - 1, :]
+        # Vertical
+        if n >= 2:
+            for m in range(n - 1):
+                P[n, m, :] = A[n, m] * sin_lat * P[n - 1, m, :] - B[n, m] * P[n - 2, m, :]
+                
+    for m in range(N + 1):
+        P[:, m, :] *= scale_m[m]
+        
+    return P
 
 
 def residual_potential(
@@ -153,6 +192,9 @@ def residual_potential(
     sin_lat = z / r
     max_l = min(model.degree, degree_max if degree_max is not None else model.degree)
 
+    # Precompute Legendre matrix for all queries to avoid float64 lpmv overflow
+    P_matrix = compute_normalized_legendre_matrix(max_l, sin_lat)
+
     series = np.zeros_like(r, dtype=np.float64)
     for degree in range(max(0, degree_min), max_l + 1):
         radial = r ** (-(degree + 1))
@@ -165,7 +207,7 @@ def residual_potential(
             s_lm = model.s[degree, order]
             if c_lm == 0.0 and s_lm == 0.0:
                 continue
-            p_lm = fully_normalized_legendre(degree, order, sin_lat)
+            p_lm = P_matrix[degree, order, :]
             if order == 0:
                 trig = c_lm
             else:

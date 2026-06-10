@@ -272,7 +272,7 @@ Each item below is **independently executable** (no item blocks another; soft sy
 noted), respects the claims policy, and has its own acceptance gate. Recommended order:
 N10 → N12 → N13 → N11 → N15 → N16 → N14 → N17, but any can be picked up alone.
 
-### N10 — Dynamics-aware risk: `stm_dispersion` scoring mode (exploratory diagnostic)
+### ~~N10 — Dynamics-aware risk: `stm_dispersion` scoring mode (exploratory diagnostic)~~ **(DONE)**
 
 - **Why:** the headline open finding is that pointwise force-risk does NOT rank long-horizon
   *position* error (expected; documented). The repo already has the machinery to test the
@@ -291,7 +291,7 @@ N10 → N12 → N13 → N11 → N15 → N16 → N14 → N17, but any can be pick
   numbers either way; tests pin the score's shape/finiteness and its exact reuse of the fitted
   posterior (sign/eps/weights). **Effort:** M-L.
 
-### N11 — Second band-limited residual dataset (surrogate-agnosticism evidence)
+### ~~N11 — Second band-limited residual dataset (surrogate-agnosticism evidence)~~ **(DONE)**
 
 - **Why:** every real-data claim currently rests on ONE dataset (GRAIL gl0420a, degree-2..60
   residual). A second residual band (e.g. a degree-30 truncation surrogate → 31..90 residual)

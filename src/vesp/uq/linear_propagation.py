@@ -185,3 +185,47 @@ class LinearForceErrorCovariancePropagator:
             position_sigma=np.sqrt(pos_var),
             velocity_sigma=np.sqrt(vel_var),
         )
+
+
+def score_stm_dispersion(
+    plugin: VESPUQPlugin,
+    initial_states: torch.Tensor | np.ndarray,
+    duration_s: float,
+    output_dt_s: float,
+    mu: float = 1.0,
+    base_accel_fn=None,
+    fd_eps: float = 1.0e-6,
+    device: torch.device | str = "cpu",
+    dtype: torch.dtype = torch.float64,
+) -> torch.Tensor:
+    """Exploratory diagnostic trajectory score using linearized STM dynamics.
+
+    Returns a 1-D tensor of risk scores (one per initial state) calculated as the *maximum*
+    position-dispersion sigma (`max(sqrt(trace(P_rr)))`) along the integrated trajectory.
+
+    This function is explicitly excluded from the default positional `SCORING_FUNCTIONS` by
+    design (see `VESP_UQ_NEXT_STEPS.md` N10).
+    """
+
+    y0s = np.asarray(initial_states, dtype=np.float64)
+    if y0s.ndim == 1:
+        y0s = y0s.reshape(1, -1)
+    if y0s.shape[1] != 6:
+        raise ValueError(f"initial_states must have shape (N, 6), got {y0s.shape}")
+
+    prop = LinearForceErrorCovariancePropagator(
+        plugin,
+        dt_s=min(60.0, output_dt_s),
+        mu=mu,
+        base_accel_fn=base_accel_fn,
+        fd_eps=fd_eps,
+        device=device,
+        dtype=dtype,
+    )
+
+    scores = []
+    for y0 in y0s:
+        res = prop.propagate(y0, duration_s=duration_s, output_dt_s=output_dt_s)
+        scores.append(float(np.max(res.position_sigma)))
+
+    return torch.tensor(scores, dtype=torch.float64)
