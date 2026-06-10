@@ -148,6 +148,25 @@ batch refit on the concatenated data (same `lambda`/noise; pass fresh `val_posit
 to recalibrate the noise law honestly). See `docs/VESP_UQ_LIMITATIONS.md` for what an update
 deliberately does **not** re-select.
 
+### Mission Console (desktop UI)
+
+The full lifecycle is also drivable from a PyQt6 desktop app:
+
+```text
+python ui/app_vespuq.py
+```
+
+Six pages — **Dashboard** (models/runs overview), **Train** (configure + launch a training run
+with live logs and a calibration result panel), **Screen** (serve a persisted model over a
+generated ensemble or an external CSV, with policy overrides and a flagged-trajectory table),
+**Model** (provenance, packaged decision policy, model card, and the uncertainty-vs-altitude
+profile), **Update** (exact sequential update with the honesty warning surfaced in-page), and
+**Runs** (manifest/provenance browser). The heavy pipelines run as subprocesses of the
+documented CLIs (`python -m vesp.uq.run` / `vesp.uq.screen`), so anything done in the UI is
+reproducible from the command line; results are read back from the artifact/manifest layer.
+The UI shell imports no torch/matplotlib at startup (lazy workers; pinned by
+`tests/test_vespuq_ui.py`).
+
 Prediction paths are query-chunked (`uq.query_chunk_size`, default 8192 positions per dense
 block) and `score_ensemble` scores the whole trajectory ensemble in batched passes — bounded
 memory on large ensembles, identical per-trajectory numbers to a `score_trajectory` loop

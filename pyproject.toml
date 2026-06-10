@@ -49,10 +49,11 @@ select = ["E", "F", "I", "W", "B", "UP"]
 ignore = ["E501"]
 
 [tool.ruff.lint.per-file-ignores]
-# Scripts and tests legitimately insert sys.path / configure the environment before importing
-# `vesp`, so module-level imports are not all at the top of the file (E402).
+# Scripts, tests, and the UI launcher legitimately insert sys.path / configure the environment
+# before importing `vesp`, so module-level imports are not all at the top of the file (E402).
 "scripts/*" = ["E402"]
 "tests/*" = ["E402"]
+"ui/*" = ["E402"]
 
 [tool.ruff.format]
 # Provided so `ruff format` works locally with the same line length; not enforced in CI (N2 scope).

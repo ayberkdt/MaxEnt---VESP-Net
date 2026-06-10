@@ -230,10 +230,32 @@ Open gaps found while surveying the code (evidence in parentheses):
   assertions; CI smoke now exercises the full train→serve chain
   (`vesp.uq.run --save-model` → `vesp.uq.screen`); `ruff check` clean; full suite green.
 
+### N9 — Mission Console desktop UI — **DONE**
+
+- **Why:** every capability (train, serve, inspect, update, provenance) was CLI-only; an
+  operator-facing console makes the lifecycle manageable without memorizing commands, while
+  keeping the CLIs the single source of truth.
+- **Done:** `python ui/app_vespuq.py` launches a PyQt6 app (`src/vesp/ui`, ~6 pages on a
+  dark nav-rail shell): Dashboard (model/run KPIs + recent runs), Train (config + overrides →
+  temp-config `python -m vesp.uq.run` subprocess with live log, calibration table + KPI result
+  panel), Screen (model picker + CSV/generated source + policy overrides →
+  `python -m vesp.uq.screen` subprocess, flagged-row table), Model (fit/policy/provenance grids,
+  rendered model card, uncertainty-vs-altitude matplotlib profile), Update (worker-thread
+  `update_error` with the LIMITATIONS warning in-page, before→after summary), Runs
+  (manifest/provenance browser incl. input checksums). Heavy work runs in subprocesses
+  (`ProcessJob`/QProcess, cancellable) or worker threads (`FnWorker`); `vesp/__init__` made
+  lazy (PEP 562) so the UI shell — and any torch-free import — no longer pays the torch import
+  at startup. Tests (`tests/test_vespuq_ui.py`) pin module import safety, the no-heavy-imports
+  contract (clean-subprocess check), run-scan classification, and the thin-launcher shape;
+  they skip when PyQt6 is absent (CI) and never instantiate `QApplication`.
+- **Acceptance:** met — UI tests + full suite green, `ruff` clean (launcher added to the E402
+  per-file ignores alongside scripts/tests); the GUI itself needs an interactive desktop, so
+  windowed verification happens on the user's machine (`python ui/app_vespuq.py`).
+
 ## Recommended order
 
-`N0 → ~~N1~~ → ~~N2~~ → ~~N3~~ → ~~N4~~ → ~~N5~~ → ~~N6~~ → ~~N7~~ → ~~N8~~`. **All planned
-items (N1–N8) are done.** Rationale: commit first (N0); then the low-risk, high-value
+`N0 → ~~N1~~ → ~~N2~~ → ~~N3~~ → ~~N4~~ → ~~N5~~ → ~~N6~~ → ~~N7~~ → ~~N8~~ → ~~N9~~`. **All
+planned items (N1–N9) are done.** Rationale: commit first (N0); then the low-risk, high-value
 reproducibility/quality items (N1, N2) that harden everything already built; then the propagation
 capability as a documented, tested deliverable (N3) with script-level schema tests (N4); N5
 bounds the external ST-LRPS subsystem honestly. N6 — the one new-research item — was done last,
@@ -241,7 +263,8 @@ on explicit request, as an **exploratory** force-model correction reporting meas
 **and** cost with honest caveats. N7 hardened the layer's hot path and added fit-once/reuse
 persistence without changing any reported number. N8 turned the layer into a deployable model
 lifecycle: train/serve separation, packaged decision policy + model card, input provenance, and
-an exact sequential update.
+an exact sequential update. N9 put an operator-facing desktop console on top of the same entry
+points without forking any behavior into the UI.
 
 ## Out of scope (and why)
 
