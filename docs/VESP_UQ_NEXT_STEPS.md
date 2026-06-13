@@ -1,12 +1,18 @@
-# VESP-UQ — Next Steps Plan
+# VESP-UQ — Implementation Roadmap and Backlog
 
-A forward-looking, prioritized plan for the VESP-UQ layer, grounded in the current state of the
-repository. This is a working roadmap, **not** a claims policy — the binding policy on what may be
-claimed stays in [`SCIENTIFIC_CLAIMS.md`](SCIENTIFIC_CLAIMS.md) and the scope boundaries in
-[`VESP_UQ_LIMITATIONS.md`](VESP_UQ_LIMITATIONS.md). Every item below must respect those constraints
-(no position-error prediction claim, no validated operational orbit covariance, no invented units).
+This file is the implementation history for N1-N21 plus the deliberately unscheduled research
+backlog. All scheduled implementation items N1-N21 are complete; N18's falsifiable validation
+target partially failed and is recorded as such rather than treated as a pending implementation.
+System hardening and silent-failure prevention are tracked separately in
+[`VESP_SYSTEM_HARDENING_PLAN.md`](VESP_SYSTEM_HARDENING_PLAN.md), where H1-H8 are complete.
 
-## Where we are
+This is **not** a claims policy. The binding policy remains
+[`SCIENTIFIC_CLAIMS.md`](SCIENTIFIC_CLAIMS.md), with scope boundaries in
+[`VESP_UQ_LIMITATIONS.md`](VESP_UQ_LIMITATIONS.md). Future backlog work must respect those
+constraints: no position-error prediction claim, no validated operational orbit covariance, and
+no invented units.
+
+## Historical baseline before N1
 
 Recently completed (in the working tree, see commit grouping in N0):
 
@@ -22,7 +28,7 @@ Recently completed (in the working tree, see commit grouping in N0):
   minimal CI workflow (`.github/workflows/ci.yml`).
 - Test count: 335 → 364.
 
-Open gaps found while surveying the code (evidence in parentheses):
+Historical gaps that motivated N1-N5 (all resolved):
 
 - The newer scripts write bare output files and do **not** use the artifact/manifest +
   checksum system the main run uses (`grep` of `ensure_run_layout`/`write_run_manifest` over
@@ -37,9 +43,9 @@ Open gaps found while surveying the code (evidence in parentheses):
 - The ST-LRPS adapter (`src/vesp/adapters/st_lrps`, 72 `.py` files) has **zero tests** and is
   exploratory wiring.
 
-## Phases (prioritized)
+## Completed implementation history (N1-N9)
 
-### N0 — Commit the current Tier 1–5 work (prerequisite)
+### N0 — Historical repository-hygiene prerequisite
 
 - **Why:** 18 modified + 4 new files are uncommitted; everything below should build on a clean base.
 - **Action:** commit in logical groups —
@@ -48,7 +54,8 @@ Open gaps found while surveying the code (evidence in parentheses):
   3. doc-integrity (benchmarks README, units note, README),
   4. linearized covariance propagation,
   5. conformal-corrected physical budget.
-- **Acceptance:** clean working tree; CI green on the pushed branch.
+- **Acceptance:** clean working tree; CI green on the pushed branch. This was a process checkpoint,
+  not a maintained feature status; current local working-tree state is outside this roadmap.
 - **Effort:** XS.
 
 ### N1 — Reproducibility: route script outputs through the artifact/manifest system — **DONE**
@@ -246,8 +253,9 @@ Open gaps found while surveying the code (evidence in parentheses):
   (`ProcessJob`/QProcess, cancellable) or worker threads (`FnWorker`); `vesp/__init__` made
   lazy (PEP 562) so the UI shell — and any torch-free import — no longer pays the torch import
   at startup. Tests (`tests/test_vespuq_ui.py`) pin module import safety, the no-heavy-imports
-  contract (clean-subprocess check), run-scan classification, and the thin-launcher shape;
-  they skip when PyQt6 is absent (CI) and never instantiate `QApplication`.
+  contract (clean-subprocess check), run-scan classification, and the thin-launcher shape.
+  H4 later added an offscreen `QApplication`/Compare subprocess smoke and CI now installs PyQt6,
+  while environments without PyQt6 still skip the UI modules cleanly.
 - **Acceptance:** met — UI tests + full suite green, `ruff` clean (launcher added to the E402
   per-file ignores alongside scripts/tests); the GUI itself needs an interactive desktop, so
   windowed verification happens on the user's machine (`python ui/app_vespuq.py`).
@@ -266,11 +274,10 @@ lifecycle: train/serve separation, packaged decision policy + model card, input 
 an exact sequential update. N9 put an operator-facing desktop console on top of the same entry
 points without forking any behavior into the UI.
 
-## Next wave (N10+): planned, independent work items
+## Completed implementation history (N10-N17)
 
-Each item below is **independently executable** (no item blocks another; soft synergies are
-noted), respects the claims policy, and has its own acceptance gate. Recommended order:
-N10 → N12 → N13 → N11 → N15 → N16 → N14 → N17, but any can be picked up alone.
+These items were designed as independently executable work and are retained below as implementation
+history with their acceptance gates and measured outcomes.
 
 ### ~~N10 — Dynamics-aware risk: `stm_dispersion` scoring mode (exploratory diagnostic)~~ **(DONE)**
 
@@ -396,12 +403,104 @@ N10 → N12 → N13 → N11 → N15 → N16 → N14 → N17, but any can be pick
 > in the nav rail; import-safety + heavy-import contracts extended in
 > `tests/test_vespuq_ui.py`.
 
-### Backlog (deliberately not scheduled)
+## Completed implementation history (N18-N21)
 
-- **Angular heteroscedastic noise refinement** — opt-in low-order angular misfit term; only if
-  N11 surfaces region-dependent miscalibration (research risk: marginal gains).
+**Historical rationale before N18-N19.** N11 produced the freshest empirical signal in the repo: on the
+second residual band (degree-31..90) the layer is **under-confident in-distribution**
+(z_std 0.09–0.17, PICP90 = 1.00 in every band) while staying near-nominal on the band the
+noise law was developed against (L60 low band: z_std 1.09, PICP90 0.87). The 2-parameter
+altitude power law transfers *usability* across bands but not *sharpness*. Meanwhile the
+conformal machinery (`vesp.uq.conformal`, finite-sample coverage guarantees, bidirectional
+scale) already exists but is wired only into the audit script and the physical-budget
+threshold — not into the prediction path or the model artifact. Closing that gap is the
+highest-leverage next step, and it is claims-safe by construction (distribution-free,
+held-out-calibrated). The second gap: the IAC evidence pack collects Markdown tables only —
+**no figures** — while a paper needs reliability diagrams and risk/error scatter plots.
+
+### N18 — Operational conformal calibration packaged with the model — **DONE; validation target partially failed**
+
+- **Why:** fix the N11 sharpness finding with the principled tool already in the repo: a
+  held-out conformal scale applied to the predictive uncertainty — widening when under-covering
+  (scale > 1), **sharpening when over-covering** (scale < 1, the L90 case) — with finite-sample
+  coverage guarantees instead of a hand-tuned noise-law tweak.
+- **Deliverables:** opt-in `uq.conformal.apply: true` — fit the scale (global, and optionally
+  per altitude band) on the held-out split at train time; persist it in the model artifact
+  (`user_metadata` + applied inside `predict_uncertainty`/`predict_covariance_3x3` when
+  enabled); decision-policy metadata and the model card record it; thresholds calibrate on the
+  conformalized scores so the screening stays self-consistent; `save/load` round-trips it.
+- **Acceptance (falsifiable):** L90 rerun with conformal applied reaches z_std in [0.7, 1.3]
+  and PICP90 in [0.85, 0.95] per band (or the failure is reported honestly); the L60 run
+  changes within noise; default behavior (apply: false) is bit-identical to today; coverage
+  property test + persistence round-trip test. `VESP_UQ_LIMITATIONS.md` documents the
+  exchangeability caveat and the per-band extrapolation rule.
+- **Implemented in this pass:** `uq.conformal.apply` now gates the operational prediction path;
+  global/per-band scales are fitted on the held-out split, persisted through save/load, applied to
+  `predict_uncertainty` and `predict_covariance_3x3`, surfaced in run metadata/model cards/UI, and
+  covered by default-off, scaling, per-band fallback, covariance, and round-trip tests.
+- **Long-run validation:** executed via `scripts/run_conformal_validation.py` and recorded in
+  `benchmarks/vespuq_conformal_validation.md/json`. The result is honest partial failure: L90 mid
+  band reaches the target, but L60 and L90 low/high bands remain conservative/out of range, so
+  conformal operationalization is useful but not a complete sharpness fix.
+- **Effort:** M.
+
+### N19 — Publication figure stage for the evidence pack — **DONE**
+
+- **Why:** the IAC pack has tables but zero figures; a paper needs plots, and they must come
+  from the same provenance-checked artifacts as the tables.
+- **Deliverables:** a figures module/script (Agg backend, PNG + PDF): reliability diagram
+  (nominal vs empirical coverage per band), sigma-vs-altitude profile, risk-vs-true-error
+  scatter with the flagged set highlighted, MC-vs-STM agreement curve, and the L60-vs-L90
+  band comparison chart; `build_iac_pack.py` gains a `figures/` stage (checksummed into the
+  manifest); CI smoke renders the figure set on the smoke config.
+- **Acceptance:** one command produces the figures from existing run artifacts (no refitting);
+  every figure traceable to its source manifest; CI green.
+- **Done:** added `vesp.uq.figures` + `scripts/render_iac_figures.py`, integrated the figure stage
+  into `build_iac_pack.py`, checksummed PNG/PDF outputs into the pack manifest, and extended CI +
+  pytest coverage for the figure and manifest contracts.
+- **Effort:** M.
+
+### N20 — Mission Console: Compare page — **DONE**
+
+- **Why:** the N12 promotion gate is CLI-only; the operator workflow (pick model A/B, judge
+  drift) belongs in the console next to Train/Screen/Propagate.
+- **Deliverables:** a "Compare" page driving `scripts/compare_models.py` as a subprocess (two
+  model pickers, held-out CSV picker, optional trajectory CSV, live log) and rendering the
+  verdict: posterior-distance panel, calibration A/B table, agreement chips (flag IoU, risk
+  Spearman) with neutral/ok/warn coloring; import-safety + nav tests extended.
+- **Acceptance:** page runs the comparison end-to-end on two saved smoke models; UI shell stays
+  heavy-import-free; identity comparison renders IoU = 1.0.
+- **Implemented in this pass:** added the Compare page to the Mission Console nav, wired it to
+  `python -m scripts.compare_models` with model/data/trajectory pickers and live logs, and renders
+  posterior drift, domain shift, calibration A/B, and screening-agreement KPIs. Import-safety and
+  helper tests were extended. H4 later added the offscreen end-to-end identity smoke, which renders
+  IoU and Spearman 1.0 through the real subprocess path.
+- **Effort:** S-M.
+
+### N21 — Scoped static typing gate (mypy) — **DONE**
+
+- **Why:** deferred at N2 and N15; the maintained surface (uq/common/ui) is now stable enough
+  that a typing gate catches interface drift cheaply.
+- **Deliverables:** `[tool.mypy]` in `pyproject.toml` (pragmatic: `ignore_missing_imports` for
+  torch/PyQt6, no `strict`), fixes for surfaced issues on `src/vesp/uq src/vesp/common
+  src/vesp/ui`, and a CI `typecheck` job scoped to those trees (blocking on the scoped tree
+  only; the legacy feasibility tree stays out, mirroring the lint-scope decision).
+- **Acceptance:** `mypy` clean on the scoped trees in CI; no behavior changes.
+- **Implemented in this pass:** added `mypy` to the dev extra, `[tool.mypy]` scoped to
+  `src/vesp/uq`, `src/vesp/common`, and `src/vesp/ui`, a blocking GitHub Actions `typecheck` job,
+  and regression tests that pin the config/workflow contract. H5 later switched the job from
+  `--no-deps` to the full `.[dev]` runtime, fixed all surfaced maintained-surface issues, and
+  verified `Success: no issues found in 51 source files`.
+- **Effort:** S-M.
+
+## Current research backlog (deliberately not scheduled)
+
+- **Angular heteroscedastic noise refinement** — N11 surfaced *band*-level (global sharpness)
+  miscalibration, which N18's conformal scale addresses more cheaply; revisit the angular term
+  only if per-region residuals stay miscalibrated *after* N18.
 - **Matrix-free / iterative solver scaling** — only needed beyond ~5-10k sources; large lift.
 - **Full ST-LRPS validated integration** — still out of scope (claims policy; external dep).
+- **Windows CI job / docs site (pdoc)** — nice-to-haves; the user's machine already exercises
+  Windows daily and docstrings remain the API reference.
 
 ## Out of scope (and why)
 

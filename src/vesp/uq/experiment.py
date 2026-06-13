@@ -271,8 +271,11 @@ def run_vespuq(config: dict, *, return_plugin: bool = False):
     n_points_total = sum(int(t.shape[0]) for t in trajectories)
     flagged_set = set(screening.flagged_indices)
     report = {
-        "dataset": str(config.get("data", {}).get("path") or samples.metadata.get("mode", "synthetic")),
+        "dataset": str(config.get("data", {}).get("path") or (samples.metadata or {}).get("mode", "synthetic")),
         "fit": plugin.fit_info,
+        "conformal_calibration": (
+            plugin.conformal_calibration or {"enabled": False, "apply": plugin.conformal_apply}
+        ),
         "units": _units_metadata(config),
         "experiment_1_calibration": calibration,
         "experiment_3_screening": {

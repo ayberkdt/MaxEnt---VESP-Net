@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import io
 import sys
 from pathlib import Path
 
@@ -19,6 +20,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT / "src") not in sys.path:
     sys.path.insert(0, str(ROOT / "src"))
 
+from vesp.common.artifacts import atomic_write_text
 from vesp.feasibility.experiments.runner import git_commit_hash, load_experiment_config, run_experiment
 from vesp.feasibility.experiments.shootout import shootout_report
 from vesp.feasibility.experiments.summarize import write_suite_artifacts
@@ -26,17 +28,18 @@ from vesp.feasibility.experiments.summarize import write_suite_artifacts
 
 def _write_matched_csv(path: Path, matched: list[dict]) -> None:
     if not matched:
-        path.write_text("", encoding="utf-8")
+        atomic_write_text(path, "")
         return
     fieldnames: list[str] = []
     for row in matched:
         for key in row:
             if key not in fieldnames:
                 fieldnames.append(key)
-    with path.open("w", encoding="utf-8", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=fieldnames, extrasaction="ignore")
-        writer.writeheader()
-        writer.writerows(matched)
+    handle = io.StringIO(newline="")
+    writer = csv.DictWriter(handle, fieldnames=fieldnames, extrasaction="ignore", lineterminator="\n")
+    writer.writeheader()
+    writer.writerows(matched)
+    atomic_write_text(path, handle.getvalue())
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -72,7 +75,7 @@ def main(argv: list[str] | None = None) -> int:
 
     markdown, matched, _tally = shootout_report(result.rows)
     verdict_path = suite_dir / "shootout_verdict.md"
-    verdict_path.write_text(markdown, encoding="utf-8")
+    atomic_write_text(verdict_path, markdown)
     _write_matched_csv(suite_dir / "shootout_matched.csv", matched)
 
     # encoding-safe console output (Windows consoles may not be UTF-8); the .md file keeps the marks

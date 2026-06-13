@@ -28,8 +28,12 @@ import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import replace
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
+
+if TYPE_CHECKING:
+    import h5py
 
 try:
     from numba import njit  # type: ignore

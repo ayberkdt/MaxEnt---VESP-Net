@@ -18,16 +18,20 @@ Outputs:
 from __future__ import annotations
 
 import argparse
-import json
 from pathlib import Path
 
 import torch
-from run_force_error_benchmark import _benchmark_md, force_error_benchmark, prepare
 
 from vesp.common.config import load_config
 from vesp.uq.ensemble import generate_orbit_ensemble
+from vesp.uq.io.run_artifacts import write_run_artifacts
 from vesp.uq.reporting import calibration_table, csv_text
 from vesp.uq.selection import select_reruns
+
+if __package__:
+    from scripts.run_force_error_benchmark import _benchmark_md, force_error_benchmark, prepare
+else:
+    from run_force_error_benchmark import _benchmark_md, force_error_benchmark, prepare
 
 
 def _calibration_report(plugin, held, config) -> tuple[str, dict]:
@@ -162,40 +166,29 @@ def main(argv=None) -> None:
 
     config = load_config(args.config)
     out = Path(args.out_dir)
-    out.mkdir(parents=True, exist_ok=True)
     numbers: dict = {"config": args.config, "benchmarks": {}}
 
     prepared = prepare(config)
     plugin, samples, train, held, dtype, seed = prepared
 
     cal_md, cal_n = _calibration_report(plugin, held, config)
-    (out / "calibration_report.md").write_text(cal_md, encoding="utf-8")
     numbers["benchmarks"]["calibration"] = {"status": "ok", **cal_n}
 
     fe = force_error_benchmark(config, rerun_fraction=args.rerun_fraction, prepared=prepared)
     fe_rows = fe.pop("_scores")
-    (out / "force_error_benchmark.md").write_text(_benchmark_md(fe), encoding="utf-8")
-    (out / "force_error_benchmark.json").write_text(json.dumps(fe, indent=2), encoding="utf-8")
     header = ["trajectory_id", "force_risk", "true_force_error", "flagged"]
-    (out / "force_error_scores.csv").write_text(
-        "\n".join([",".join(header)] + [",".join(str(r[h]) for h in header) for r in fe_rows]) + "\n",
-        encoding="utf-8",
-    )
+    force_error_csv = csv_text(header, [[row[column] for column in header] for row in fe_rows])
     numbers["benchmarks"]["force_error"] = {"status": "ok", **{k: v for k, v in fe.items()}}
 
     ood_md, ood_n = _ood_altitude_sweep(plugin)
-    (out / "ood_altitude_sweep.md").write_text(ood_md, encoding="utf-8")
     numbers["benchmarks"]["ood_altitude_sweep"] = {"status": "ok", **ood_n}
 
     abs_md, abs_n = _absolute_threshold_screening(plugin, config, seed)
-    (out / "absolute_threshold_screening.md").write_text(abs_md, encoding="utf-8")
     numbers["benchmarks"]["absolute_threshold_screening"] = {"status": "ok", **abs_n}
 
     pos_md, pos_n = _position_error_diagnostic(out)
-    (out / "position_error_diagnostic.md").write_text(pos_md, encoding="utf-8")
     numbers["benchmarks"]["position_error_diagnostic"] = pos_n
 
-    (out / "iac_numbers.json").write_text(json.dumps(numbers, indent=2), encoding="utf-8")
     summary = "\n".join([
         "# VESP-UQ IAC Benchmark Summary",
         "",
@@ -217,7 +210,27 @@ def main(argv=None) -> None:
         "operational orbit covariance propagation; ST-LRPS integration.",
         "",
     ]) + "\n"
-    (out / "iac_summary.md").write_text(summary, encoding="utf-8")
+    write_run_artifacts(
+        out_dir=out,
+        tool="run_iac_benchmarks",
+        config=config,
+        config_path=args.config,
+        seed=seed,
+        inputs={"config": args.config},
+        json_files={
+            "force_error_benchmark.json": fe,
+            "iac_numbers.json": numbers,
+        },
+        text_files={
+            "calibration_report.md": cal_md,
+            "force_error_benchmark.md": _benchmark_md(fe),
+            "force_error_scores.csv": force_error_csv,
+            "ood_altitude_sweep.md": ood_md,
+            "absolute_threshold_screening.md": abs_md,
+            "position_error_diagnostic.md": pos_md,
+            "iac_summary.md": summary,
+        },
+    )
     print(summary)
     print(f"saved_iac_suite: {out}")
 

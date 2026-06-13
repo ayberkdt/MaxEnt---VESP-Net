@@ -18,6 +18,7 @@ import json
 import scripts.compare_risk_baselines as crb
 import scripts.run_calibration_audit as ca
 import scripts.run_force_error_benchmark as feb
+import scripts.run_iac_benchmarks as iac
 from vesp.uq.benchmarking import METRIC_KEYS
 
 
@@ -133,3 +134,50 @@ def test_run_propagation_importable():
     import scripts.run_propagation as rp
 
     assert callable(rp.main)
+
+
+def test_iac_orchestrator_uses_shared_artifact_contract(tmp_path, monkeypatch):
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("{}\n", encoding="utf-8")
+    config = {"seed": 7}
+    prepared = (object(), object(), object(), object(), None, 7)
+    force_report = {
+        "_scores": [
+            {"trajectory_id": 0, "force_risk": 1.0, "true_force_error": 2.0, "flagged": 1},
+        ],
+        "spearman_force_risk_vs_true_force_error": 1.0,
+        "lift_over_random": 2.0,
+    }
+
+    monkeypatch.setattr(iac, "load_config", lambda _path: config)
+    monkeypatch.setattr(iac, "prepare", lambda _config: prepared)
+    monkeypatch.setattr(iac, "_calibration_report", lambda *_args: ("calibration\n", {"low_band_picp_90": 0.9}))
+    monkeypatch.setattr(iac, "force_error_benchmark", lambda *_args, **_kwargs: dict(force_report))
+    monkeypatch.setattr(iac, "_benchmark_md", lambda _report: "force\n")
+    monkeypatch.setattr(
+        iac,
+        "_ood_altitude_sweep",
+        lambda _plugin: ("ood\n", {"expected_error_grows_low_altitude": True}),
+    )
+    monkeypatch.setattr(
+        iac,
+        "_absolute_threshold_screening",
+        lambda *_args: ("absolute\n", {"zero_alarm_capable": True}),
+    )
+    monkeypatch.setattr(
+        iac,
+        "_position_error_diagnostic",
+        lambda _out: ("position\n", {"status": "skipped"}),
+    )
+
+    iac.main(["--config", str(config_path), "--out-dir", str(tmp_path / "iac")])
+
+    out = tmp_path / "iac"
+    manifest = _read_json(out / "run_manifest.json")
+    assert manifest["tool"] == "run_iac_benchmarks"
+    assert manifest["inputs"]["config"]["sha256"]
+    assert manifest["artifacts"]["iac_numbers.json"]["origin"] == "generated"
+    assert _read_json(out / "iac_numbers.json")["_provenance"]["tool"] == "run_iac_benchmarks"
+    assert (out / "force_error_scores.csv").read_text(encoding="utf-8").splitlines()[0] == (
+        "trajectory_id,force_risk,true_force_error,flagged"
+    )

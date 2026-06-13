@@ -513,10 +513,10 @@ if _HAS_QT:
             super().__init__(parent)
             self._records: list[TrainingRecord] = []
 
-        def rowCount(self, parent=QModelIndex()):
+        def rowCount(self, parent=None):
             return len(self._records)
 
-        def columnCount(self, parent=QModelIndex()):
+        def columnCount(self, parent=None):
             return len(_PROGRESS_COLUMNS)
 
         def headerData(self, section, orientation, role=Qt.ItemDataRole.DisplayRole):
@@ -721,10 +721,10 @@ if _HAS_QT:
             self._rows: list[dict[str, Any]] = []
             self._cols = _HISTORY_COLUMNS
 
-        def rowCount(self, parent=QModelIndex()):
+        def rowCount(self, parent=None):
             return len(self._rows)
 
-        def columnCount(self, parent=QModelIndex()):
+        def columnCount(self, parent=None):
             return len(self._cols)
 
         def headerData(self, section, orientation, role=Qt.ItemDataRole.DisplayRole):

@@ -28,10 +28,10 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from vesp.ui.jobs import ProcessJob, open_in_file_manager
+from vesp.ui.jobs import ProcessJob
 from vesp.ui.paths import OUTPUTS_DIR, ROOT, list_configs
 from vesp.ui.theme import TOKENS
-from vesp.ui.widgets import Card, KpiTile, LogConsole, PageHeader, StatusChip, make_button
+from vesp.ui.widgets import Card, KpiTile, LogConsole, PageHeader, RunOutputActions, StatusChip, make_button
 
 
 class PropagatePage(QWidget):
@@ -43,7 +43,7 @@ class PropagatePage(QWidget):
         self.job.line.connect(lambda line: self.console.append_line(line))
         self.job.finished.connect(self._on_finished)
         self._out_dir: Path | None = None
-        self._canvas = None
+        self._canvas: QWidget | None = None
 
         root = QVBoxLayout(self)
         root.setContentsMargins(28, 24, 28, 24)
@@ -54,7 +54,7 @@ class PropagatePage(QWidget):
             "linearized STM covariance, or the Monte Carlo sampler as a cross-check.",
         )
         self.status = StatusChip("idle")
-        header.actions.addWidget(self.status)
+        header.add_action(self.status)
         root.addWidget(header)
 
         caveat = QLabel(
@@ -123,9 +123,9 @@ class PropagatePage(QWidget):
         for tile in (self.kpi_final, self.kpi_max, self.kpi_points):
             tiles.addWidget(tile)
         result_card.add_layout(tiles)
-        self.open_dir = make_button("Open run folder", variant="ghost", on_click=self._open_dir)
-        self.open_dir.setEnabled(False)
-        result_card.add(self.open_dir)
+        self.output_actions = RunOutputActions()
+        self.open_dir = self.output_actions.open_dir
+        result_card.add(self.output_actions)
         col.addWidget(result_card)
         col.addStretch(1)
 
@@ -164,6 +164,7 @@ class PropagatePage(QWidget):
         if stm:
             stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             self._out_dir = OUTPUTS_DIR / f"ui_propagation_{stamp}"
+            self.output_actions.set_output(self._out_dir)
             script = ROOT / "scripts" / "run_linear_propagation.py"
             args = [
                 sys.executable, "-u", str(script),
@@ -184,7 +185,7 @@ class PropagatePage(QWidget):
         self.run_button.setEnabled(False)
         self.cancel_button.setEnabled(True)
         self.progress.setRange(0, 0)
-        self.open_dir.setEnabled(False)
+        self.output_actions.set_actions_enabled(False)
         self.job.start(args)
 
     # ------------------------------------------------------------------ results
@@ -200,7 +201,10 @@ class PropagatePage(QWidget):
             self._load_states_csv()
 
     def _load_states_csv(self) -> None:
-        path = self._out_dir / "linear_propagation_states.csv"
+        out_dir = self._out_dir
+        if out_dir is None:
+            return
+        path = out_dir / "linear_propagation_states.csv"
         if not path.is_file():
             self.console.append_line(f"[ui] states CSV not found: {path}")
             return
@@ -217,7 +221,7 @@ class PropagatePage(QWidget):
         self.kpi_final.set(f"{pos_sigma[-1]:.3e}", "model-normalized length units")
         self.kpi_max.set(f"{max(pos_sigma):.3e}", "1-sigma 3D dispersion along the orbit")
         self.kpi_points.set(str(len(times)), f"t in [0, {times[-1]:.1f}]")
-        self.open_dir.setEnabled(True)
+        self.output_actions.set_actions_enabled(True)
         self._draw(times, pos_sigma, vel_sigma)
 
     def _draw(self, times: list[float], pos_sigma: list[float], vel_sigma: list[float]) -> None:
@@ -252,7 +256,3 @@ class PropagatePage(QWidget):
         fig.tight_layout()
         self._canvas = FigureCanvasQTAgg(fig)
         self.plot_layout.addWidget(self._canvas)
-
-    def _open_dir(self) -> None:
-        if self._out_dir is not None and self._out_dir.exists():
-            open_in_file_manager(self._out_dir)

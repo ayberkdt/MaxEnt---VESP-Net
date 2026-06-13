@@ -4,6 +4,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from vesp.common.config import load_config
+from vesp.uq.figures import FIGURE_STEMS, render_iac_figures
 from vesp.uq.io.run_artifacts import write_run_artifacts
 
 EVIDENCE_MD = """# VESP-UQ IAC Evidence Pack
@@ -50,13 +52,31 @@ This bundle aggregates the claim-mapped evidence for the VESP-UQ calibration lay
 
 ## Provenance
 Every file in this pack is tracked in `run_manifest.json` via SHA-256 checksums, tying it directly to the exact source configurations.
+
+## Publication Figures
+The `figures/` directory contains PNG and PDF renderings of the same checked evidence: reliability
+by band, sigma-vs-altitude, force-risk ranking, MC-vs-STM agreement, and L60-vs-L90 band comparison.
 """
+
+
+def _train_run_dir(config_path: str) -> Path:
+    cfg = load_config(config_path)
+    output = cfg.get("output", {})
+    return Path(output.get("output_dir", "outputs")) / str(output.get("run_name", "vesp_run"))
+
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Assemble the IAC evidence pack.")
     parser.add_argument("--config", default="configs/vespuq/vespuq_smoke.yaml", help="Base config to use for generating evidence if not --collect-only")
     parser.add_argument("--collect-only", action="store_true", help="Only collect existing outputs, do not run benchmarks")
     parser.add_argument("--out-dir", default="outputs/iac_pack", help="Output directory for the evidence bundle")
+    parser.add_argument("--skip-figures", action="store_true", help="Skip publication figure rendering")
+    parser.add_argument("--train-run", help="Training run directory to use for figure inputs (default: resolve from --config)")
+    parser.add_argument(
+        "--allow-placeholder-figures",
+        action="store_true",
+        help="Allow figures rendered with missing-data placeholders instead of failing the pack build",
+    )
     args = parser.parse_args(argv)
 
     out = Path(args.out_dir)
@@ -105,6 +125,47 @@ def main(argv=None):
     if missing:
         print(f"Warning: the following evidence files were missing and skipped: {missing}")
 
+    figure_artifacts = {}
+    figure_statuses = {}
+    figure_artifact_statuses = {}
+    if not args.skip_figures:
+        print("Rendering publication figures...")
+        train_run = Path(args.train_run) if args.train_run else _train_run_dir(args.config)
+        figure_manifest = render_iac_figures(
+            train_run=train_run,
+            iac_dir="outputs/iac",
+            linear_dir="outputs/linear_propagation",
+            benchmarks_dir="benchmarks",
+            out_dir=out / "figures",
+        )
+        for entry in figure_manifest.get("figures", []):
+            for ext in ("png", "pdf"):
+                path = Path(entry[ext])
+                artifact_name = f"figures/{path.name}"
+                figure_artifacts[artifact_name] = path
+                figure_artifact_statuses[artifact_name] = entry.get("status", "ok")
+        figure_artifacts["figures/figures_manifest.json"] = out / "figures" / "figures_manifest.json"
+        missing_figures = [
+            entry["name"]
+            for entry in figure_manifest.get("figures", [])
+            if entry.get("status") == "missing_data"
+        ]
+        figure_statuses = {
+            entry["name"]: entry.get("status", "ok")
+            for entry in figure_manifest.get("figures", [])
+        }
+        figure_artifact_statuses["figures/figures_manifest.json"] = (
+            "missing_data" if missing_figures else "ok"
+        )
+        if missing_figures:
+            message = (
+                "Rendered placeholder figures for missing data: "
+                f"{missing_figures}. Re-run with --allow-placeholder-figures for partial packs."
+            )
+            if not args.allow_placeholder_figures:
+                raise SystemExit(message)
+            print(f"Warning: {message}")
+
     # 3. EVIDENCE.md + manifest via the artifact layer. The collected evidence files were
     # copied above, so checksum them into the manifest as consumed inputs -- every table in
     # the pack traces back to the exact bytes of the run that produced it.
@@ -114,7 +175,16 @@ def main(argv=None):
         tool="build_iac_pack",
         json_files={},
         text_files={"EVIDENCE.md": EVIDENCE_MD},
-        config={"source_config": args.config, "collected_files": collected},
+        artifact_files=figure_artifacts,
+        artifact_statuses=figure_artifact_statuses,
+        config={
+            "source_config": args.config,
+            "collected_files": collected,
+            "figure_stems": list(FIGURE_STEMS) if not args.skip_figures else [],
+            "figure_statuses": figure_statuses,
+            "train_run": str(Path(args.train_run) if args.train_run else _train_run_dir(args.config))
+            if not args.skip_figures else None,
+        },
         inputs={name: out / name for name in collected},
     )
 

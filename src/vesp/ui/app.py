@@ -7,8 +7,9 @@ calls :func:`main`.
 from __future__ import annotations
 
 import sys
+from typing import cast
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import QCoreApplication, Qt
 from PyQt6.QtWidgets import (
     QApplication,
     QButtonGroup,
@@ -21,6 +22,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from vesp.ui.pages.compare import ComparePage
 from vesp.ui.pages.dashboard import DashboardPage
 from vesp.ui.pages.model import ModelPage
 from vesp.ui.pages.propagate import PropagatePage
@@ -32,13 +34,14 @@ from vesp.ui.paths import ROOT
 from vesp.ui.theme import build_qss
 
 NAV_ITEMS = (
-    ("dashboard", "⌂  Dashboard"),
-    ("train", "⚙  Train"),
-    ("screen", "\U0001f6f0  Screen"),
-    ("propagate", "\U0001f4c8  Propagate"),
-    ("model", "\U0001f4e6  Model"),
-    ("update", "↻  Update"),
-    ("runs", "\U0001f5c2  Runs"),
+    ("dashboard", "Dashboard"),
+    ("train", "Train"),
+    ("screen", "Screen"),
+    ("compare", "Compare"),
+    ("propagate", "Propagate"),
+    ("model", "Model"),
+    ("update", "Update"),
+    ("runs", "Runs"),
 )
 
 
@@ -75,6 +78,7 @@ class MissionConsole(QMainWindow):
             "dashboard": DashboardPage(self.navigate),
             "train": TrainPage(),
             "screen": ScreenPage(),
+            "compare": ComparePage(),
             "propagate": PropagatePage(),
             "model": ModelPage(),
             "update": UpdatePage(),
@@ -124,7 +128,8 @@ class MissionConsole(QMainWindow):
 def main(argv: list[str] | None = None) -> int:
     """Application entry point (used by ``ui/app_vespuq.py``)."""
 
-    app = QApplication.instance() or QApplication(argv if argv is not None else sys.argv)
+    instance = QCoreApplication.instance()
+    app = cast(QApplication, instance) if instance is not None else QApplication(argv if argv is not None else sys.argv)
     app.setApplicationName("VESP-UQ Mission Console")
     app.setStyleSheet(build_qss())
     window = MissionConsole()

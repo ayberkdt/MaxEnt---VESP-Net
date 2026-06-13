@@ -6,26 +6,21 @@ provenance. This helper routes every output through the atomic writers in
 ``run_manifest.json`` recording the config snapshot, seed, environment, and a SHA-256 checksum +
 byte size for every emitted file -- so a result can be traced back to the exact config and verified.
 
-It deliberately does **not** use :func:`vesp.common.artifacts.write_run_manifest` /
-``ensure_run_layout`` (those create a training-oriented ``checkpoints/`` subdirectory); it writes the
-manifest directly while mirroring the same schema fields.
+It uses the shared manifest builder from :mod:`vesp.common.artifacts` while keeping this
+script-oriented API free of the training layout's ``checkpoints/`` side effect.
 """
 
 from __future__ import annotations
 
-import platform
-import sys
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
 from vesp.common.artifacts import (
-    RUN_MANIFEST_SCHEMA_VERSION,
     atomic_write_json,
     atomic_write_text,
-    compute_file_sha256,
-    json_safe,
     utc_now_iso,
+    write_manifest,
 )
 
 MANIFEST_NAME = "run_manifest.json"
@@ -38,6 +33,8 @@ def write_run_artifacts(
     config: Mapping[str, Any] | None = None,
     json_files: Mapping[str, Mapping[str, Any]] | None = None,
     text_files: Mapping[str, str] | None = None,
+    artifact_files: Mapping[str, str | Path] | None = None,
+    artifact_statuses: Mapping[str, Any] | None = None,
     inputs: Mapping[str, str | Path] | None = None,
     seed: Any = None,
     config_path: str | None = None,
@@ -46,11 +43,14 @@ def write_run_artifacts(
     """Write a VESP-UQ script's outputs atomically with a provenance manifest + checksums.
 
     ``json_files`` maps filename -> JSON-able payload (a ``_provenance`` block is injected unless one
-    is already present); ``text_files`` maps filename -> text (Markdown / CSV). ``inputs`` maps a
-    logical name -> path of a file the run CONSUMED (saved models, datasets, trajectory CSVs); each
-    existing input is checksummed into the manifest's ``inputs`` block so results trace to exact
-    input bytes (mirrors :func:`vesp.common.artifacts.write_run_manifest`). Returns the manifest
-    dict. Output filenames are preserved exactly; ``run_manifest.json`` is added alongside them.
+    is already present); ``text_files`` maps filename -> text (Markdown / CSV). ``artifact_files``
+    maps logical artifact names to files that were already written (for example PNG/PDF figures);
+    they are checksummed into the manifest's ``artifacts`` block without being rewritten and marked
+    with ``origin: prewritten``. ``artifact_statuses`` adds optional machine-readable status fields.
+    ``inputs`` maps a logical name -> path of a file the run CONSUMED (saved models, datasets,
+    trajectory CSVs); each existing input is checksummed into the manifest's ``inputs`` block.
+    Returns the manifest dict. Output filenames are preserved exactly; ``run_manifest.json`` is
+    added alongside them.
     """
 
     out_dir = Path(out_dir)
@@ -78,35 +78,25 @@ def write_run_artifacts(
         atomic_write_text(out_dir / name, text)
         written.append(name)
 
-    artifacts = {
-        name: {
-            "sha256": compute_file_sha256(out_dir / name),
-            "bytes": (out_dir / name).stat().st_size,
-        }
-        for name in written
+    artifacts: dict[str, str | Path] = {name: out_dir / name for name in written}
+    artifacts.update({str(name): path for name, path in (artifact_files or {}).items()})
+    artifact_metadata = {
+        name: {"origin": "generated"} for name in written
     }
-    input_payload: dict[str, dict[str, Any]] = {}
-    for name, input_path in (inputs or {}).items():
-        p = Path(input_path)
-        if p.exists() and p.is_file():
-            input_payload[str(name)] = {
-                "path": str(p),
-                "sha256": compute_file_sha256(p),
-                "bytes": p.stat().st_size,
-            }
-        else:
-            input_payload[str(name)] = {"path": str(p), "missing": True}
-    manifest = {
-        "schema_version": RUN_MANIFEST_SCHEMA_VERSION,
-        "tool": tool,
-        "created_at_utc": generated_at,
-        "python": sys.version.split()[0],
-        "platform": platform.platform(),
-        "seed": seed,
-        "config_path": config_path,
-        "config": json_safe(dict(cfg_map)),
-        "artifacts": artifacts,
-        "inputs": input_payload,
-    }
-    atomic_write_json(out_dir / manifest_name, manifest)
-    return manifest
+    artifact_metadata.update(
+        {str(name): {"origin": "prewritten"} for name in (artifact_files or {})}
+    )
+    return write_manifest(
+        out_dir / manifest_name,
+        created_at_utc=generated_at,
+        config=cfg_map,
+        artifacts=artifacts,
+        inputs=inputs,
+        artifact_statuses=artifact_statuses,
+        artifact_metadata=artifact_metadata,
+        manifest_metadata={
+            "tool": tool,
+            "seed": seed,
+            "config_path": config_path,
+        },
+    )

@@ -14,7 +14,7 @@ from vesp.core.operators import build_acceleration_operator
 from vesp.core.sources import make_shell_sources
 from vesp.uq import VESPUQPlugin
 from vesp.uq.correction import CorrectedForceField
-from vesp.uq.plugin import PLUGIN_STATE_VERSION
+from vesp.uq.plugin import PLUGIN_STATE_VERSION, PREDICTIVE_CONFORMAL_MODES
 
 
 def _query_shell(n: int, r_lo: float, r_hi: float, seed: int = 0) -> torch.Tensor:
@@ -25,7 +25,7 @@ def _query_shell(n: int, r_lo: float, r_hi: float, seed: int = 0) -> torch.Tenso
     return dirs * radii
 
 
-def _fitted_plugin() -> VESPUQPlugin:
+def _fitted_plugin(*, conformal_apply: bool = False, conformal_by_band: bool = False) -> VESPUQPlugin:
     sources = make_shell_sources([0.75, 0.9], [24, 32], dtype=torch.float64)
     sigma_true = 0.02 * torch.randn(
         sources.n_sources, generator=torch.Generator().manual_seed(3), dtype=torch.float64
@@ -41,6 +41,10 @@ def _fitted_plugin() -> VESPUQPlugin:
         val_fraction=0.25,
         risk_scoring="supervisor_rel",
         domain_support=True,
+        conformal_apply=conformal_apply,
+        conformal_by_band=conformal_by_band,
+        conformal_bands={"low": [1.05, 1.325], "high": [1.325, 1.60]},
+        conformal_min_band_n=5,
         seed=0,
     )
     plugin.fit_error(positions, error)
@@ -82,6 +86,87 @@ def test_save_load_round_trip_predicts_identically(tmp_path):
     assert loaded.altitude_noise is not None
     assert loaded.altitude_noise.log_a == pytest.approx(plugin.altitude_noise.log_a)
     assert loaded.posterior.lambda_l2 == pytest.approx(plugin.posterior.lambda_l2)
+
+
+def test_conformal_enabled_without_apply_keeps_prediction_path_off():
+    plugin = VESPUQPlugin.from_config({"model": {"n_source": 16}, "uq": {"conformal": {"enabled": True}}})
+    assert plugin.conformal_apply is False
+    assert plugin.conformal_calibration is None
+    assert plugin.conformal_mode in PREDICTIVE_CONFORMAL_MODES
+    assert plugin.sources.n_sources == 16
+
+
+def test_operational_conformal_scales_uncertainty_not_mean():
+    raw = _fitted_plugin()
+    calibrated = _fitted_plugin(conformal_apply=True)
+    assert calibrated.conformal_calibration is not None
+    assert calibrated.conformal_calibration["enabled"] is True
+    scale = calibrated.conformal_calibration["global"]["scale"]
+    queries = _query_shell(64, 1.05, 1.6, seed=17)
+
+    a = raw.predict_uncertainty(queries)
+    b = calibrated.predict_uncertainty(queries)
+    assert torch.allclose(b.mean_error, a.mean_error, rtol=1.0e-12, atol=0.0)
+    assert torch.allclose(b.std_components, a.std_components * scale, rtol=1.0e-12, atol=0.0)
+    assert torch.allclose(b.sigma, a.sigma * scale, rtol=1.0e-12, atol=0.0)
+    assert torch.allclose(
+        b.expected_error,
+        torch.sqrt((a.mean_error_magnitude * a.mean_error_magnitude + b.sigma * b.sigma).clamp_min(0.0)),
+        rtol=1.0e-12,
+        atol=0.0,
+    )
+
+    ca = raw.predict_covariance_3x3(queries)
+    cb = calibrated.predict_covariance_3x3(queries)
+    assert torch.allclose(cb.mean_error, ca.mean_error, rtol=1.0e-12, atol=0.0)
+    assert torch.allclose(cb.covariance, ca.covariance * (scale * scale), rtol=1.0e-12, atol=0.0)
+
+
+def test_conformal_per_band_uses_band_scales_with_global_fallback():
+    plugin = _fitted_plugin(conformal_apply=True, conformal_by_band=True)
+    cal = plugin.conformal_calibration
+    assert cal["scope"] == "per_band"
+    used = [b for b in cal["bands"] if b.get("used")]
+    assert used
+
+    radii = torch.tensor([1.10, 1.45, 2.00], dtype=torch.float64)
+    scales = plugin._conformal_scale_for_radius(radii)
+    band_lookup = {b["name"]: b["scale"] for b in used}
+    if "low" in band_lookup:
+        assert scales[0].item() == pytest.approx(band_lookup["low"])
+    if "high" in band_lookup:
+        assert scales[1].item() == pytest.approx(band_lookup["high"])
+    assert scales[2].item() == pytest.approx(cal["global"]["scale"])
+
+
+def test_conformal_save_load_round_trip_predicts_identically(tmp_path):
+    plugin = _fitted_plugin(conformal_apply=True)
+    path = tmp_path / "conformal_plugin.pt"
+    plugin.save(path)
+    loaded = VESPUQPlugin.load(path)
+    assert loaded.conformal_calibration == plugin.conformal_calibration
+
+    queries = _query_shell(32, 1.05, 1.6, seed=19)
+    a = plugin.predict_uncertainty(queries)
+    b = loaded.predict_uncertainty(queries)
+    assert torch.allclose(b.sigma, a.sigma, rtol=1.0e-12, atol=0.0)
+    assert torch.allclose(b.expected_error, a.expected_error, rtol=1.0e-12, atol=0.0)
+
+
+def test_conformal_update_marks_stale_until_fresh_validation():
+    plugin = _fitted_plugin(conformal_apply=True)
+    assert plugin.fit_info["conformal_stale_after_update"] is False
+
+    new_pos = _query_shell(12, 1.05, 1.6, seed=31)
+    new_err = torch.zeros_like(new_pos)
+    plugin.update_error(new_pos, new_err)
+    assert plugin.fit_info["conformal_stale_after_update"] is True
+    assert "without fresh validation" in plugin.fit_info["conformal_stale_reason"]
+
+    val_pos = _query_shell(40, 1.05, 1.6, seed=32)
+    val_err = torch.zeros_like(val_pos)
+    plugin.update_error(new_pos, new_err, val_positions=val_pos, val_error=val_err)
+    assert plugin.fit_info["conformal_stale_after_update"] is False
 
 
 def test_loaded_plugin_drives_corrected_force_field(tmp_path):

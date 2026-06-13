@@ -24,6 +24,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT / "src") not in sys.path:
     sys.path.insert(0, str(ROOT / "src"))
 
+from vesp.common.artifacts import atomic_write_text
 from vesp.common.config import merge_defaults
 from vesp.feasibility.experiments.geometry import _find_baseline, geometry_report
 from vesp.feasibility.experiments.runner import _set_nested, git_commit_hash, load_experiment_config, run_experiment
@@ -33,10 +34,11 @@ from vesp.feasibility.experiments.summarize import write_suite_artifacts
 def _write_ranking_csv(path: Path, ranking: list[dict]) -> None:
     from vesp.feasibility.experiments.geometry import REPORT_COLUMNS
 
-    with path.open("w", encoding="utf-8", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=REPORT_COLUMNS, extrasaction="ignore")
-        writer.writeheader()
-        writer.writerows(ranking)
+    handle = io.StringIO(newline="")
+    writer = csv.DictWriter(handle, fieldnames=REPORT_COLUMNS, extrasaction="ignore", lineterminator="\n")
+    writer.writeheader()
+    writer.writerows(ranking)
+    atomic_write_text(path, handle.getvalue())
 
 
 def _overrides_by_name(experiment_cfg: dict) -> dict[str, dict]:
@@ -119,13 +121,13 @@ def main(argv: list[str] | None = None) -> int:
     markdown, ranking = geometry_report(result.rows)
     verdict_path = suite_dir / "geometry_verdict.md"
     # write the verdict first so an optional calibration failure can never lose it
-    verdict_path.write_text(markdown, encoding="utf-8")
+    atomic_write_text(verdict_path, markdown)
     _write_ranking_csv(suite_dir / "geometry_ranking.csv", ranking)
 
     if args.with_calibration:
         try:
             markdown += _calibration_table(experiment_cfg, ranking, result.rows, suite_dir / "calibration")
-            verdict_path.write_text(markdown, encoding="utf-8")
+            atomic_write_text(verdict_path, markdown)
         except Exception as exc:  # noqa: BLE001 - calibration is an optional appendix
             print(f"calibration step failed (non-fatal): {exc}")
 

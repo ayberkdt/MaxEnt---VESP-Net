@@ -143,6 +143,19 @@ def fmt(x, spec: str = ".3g") -> str:
         return str(x)
 
 
+def _conformal_prediction_summary(conformal: dict) -> str:
+    """Compact human-readable summary for the operational conformal prediction layer."""
+
+    if not conformal.get("enabled"):
+        return "off"
+    global_cal = conformal.get("global") or {}
+    return (
+        f"{fmt(global_cal.get('scale'), '.3g')} "
+        f"(mode `{conformal.get('mode')}`, scope `{conformal.get('scope')}`, "
+        f"target coverage {fmt(global_cal.get('target_coverage'), '.2f')})"
+    )
+
+
 def build_report_md(report: dict) -> str:
     fit = report["fit"]
     cal = report["experiment_1_calibration"]
@@ -182,6 +195,9 @@ def build_report_md(report: dict) -> str:
             f"altitude noise sigma^2(h)=a*h^(-b): a={fmt(fit['altitude_noise_a'], '.3e')}, "
             f"b={fmt(fit['altitude_noise_b'], '.3f')} (h=r-1; larger b = faster growth toward surface)"
         )
+    conformal = report.get("conformal_calibration") or {}
+    if conformal.get("enabled"):
+        lines.append(f"operational conformal prediction scale: {_conformal_prediction_summary(conformal)}")
     lines += [
         "",
         "## Experiment 1 - Standalone residual-error calibration",
@@ -406,6 +422,7 @@ def build_model_card(report: dict, *, model_filename: str, metadata: dict) -> st
     units = report.get("units", {})
     policy = metadata.get("decision_policy", {})
     provenance = metadata.get("provenance", {})
+    conformal = metadata.get("conformal_prediction") or report.get("conformal_calibration") or {}
 
     lines = [
         f"# Model card - `{model_filename}`",
@@ -442,6 +459,7 @@ def build_model_card(report: dict, *, model_filename: str, metadata: dict) -> st
         ),
         f"- domain support: {'on' if fit.get('domain_support_enabled') else 'off'} "
         f"(k = {fit.get('domain_k')}, backend = {fit.get('domain_backend')})",
+        f"- operational conformal prediction scale: {_conformal_prediction_summary(conformal)}",
         "",
         "## Held-out calibration (training run)",
         "",

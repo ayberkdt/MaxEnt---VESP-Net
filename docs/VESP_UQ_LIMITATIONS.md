@@ -145,6 +145,12 @@ calibration numbers.
 - The heteroscedastic noise law `sigma^2(h) = a · h^(-b)` is a simple 2-parameter power-law misfit
   model fit on held-out validation residuals. In-distribution it calibrates per band; at extreme
   out-of-distribution altitude it must **extrapolate** the law.
+- Operational conformal calibration (`uq.conformal.apply: true`) is a split-conformal wrapper over
+  the predictive force-error uncertainty. Its finite-sample coverage statement assumes the
+  calibration residuals and future query residuals are exchangeable; it is not a license to claim
+  position-error or orbit-covariance realism. When per-band scales are enabled, samples inside a
+  fitted altitude band use that band's scale; under-populated bands and queries outside all fitted
+  bands fall back to the global scale.
 - Vector (ellipsoid) calibration assumes an approximately Gaussian 3D error; heavy-tailed or
   strongly non-Gaussian residuals will violate the chi-square-3 expectation.
 - The trajectory-screening ground-truth oracle is a nearest-neighbour read from real samples;

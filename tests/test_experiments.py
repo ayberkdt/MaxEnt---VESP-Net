@@ -15,6 +15,7 @@ from vesp.common.config import merge_defaults
 from vesp.core.models import MultiShellDiscreteVESP
 from vesp.feasibility.experiments.registry import CORE_EXPERIMENTS
 from vesp.feasibility.experiments.runner import (
+    _REPO_ROOT,
     Trial,
     expand_trials,
     git_commit_hash,
@@ -29,6 +30,10 @@ ROOT = Path(__file__).resolve().parents[1]
 EXP_DIR = ROOT / "configs" / "experiments"
 ALL_EXPERIMENT_CONFIGS = sorted(EXP_DIR.glob("*.yaml"))
 SYNTHETIC_CONFIGS = [p for p in ALL_EXPERIMENT_CONFIGS if p.name.startswith("synthetic_")]
+
+
+def test_experiment_runner_resolves_repository_root():
+    assert _REPO_ROOT == ROOT
 
 
 # --------------------------------------------------------------------------- config

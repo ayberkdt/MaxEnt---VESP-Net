@@ -1,6 +1,8 @@
 import json
+import os
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 import torch
@@ -132,14 +134,35 @@ def test_compare_models_cli(tmp_path, dummy_plugin, dummy_data):
                 f.write(f"{tid},{k},{1.1 + 0.05 * k},{0.1 * tid},0\n")
 
     out_dir = tmp_path / "out"
-    subprocess.check_call([
-        sys.executable, "-m", "scripts.compare_models",
-        "--model-a", str(p_a),
-        "--model-b", str(p_b),
-        "--data", str(data_csv),
-        "--trajectories", str(traj_csv),
-        "--out", str(out_dir)
-    ])
+    root = Path(__file__).resolve().parents[1]
+    env = os.environ.copy()
+    env["PYTHONPATH"] = os.pathsep.join(
+        [str(root / "src"), str(root), env.get("PYTHONPATH", "")]
+    )
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "scripts.compare_models",
+            "--model-a",
+            str(p_a),
+            "--model-b",
+            str(p_b),
+            "--data",
+            str(data_csv),
+            "--trajectories",
+            str(traj_csv),
+            "--out",
+            str(out_dir),
+        ],
+        cwd=root,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
 
     assert (out_dir / "model_comparison.json").exists()
     assert (out_dir / "model_comparison.md").exists()
@@ -147,12 +170,24 @@ def test_compare_models_cli(tmp_path, dummy_plugin, dummy_data):
 
     with open(out_dir / "model_comparison.json") as f:
         res = json.load(f)
-    assert "posterior_distance" in res
+    assert {
+        "posterior_distance",
+        "domain_shift",
+        "calibration",
+        "screening_agreement",
+        "_provenance",
+    } <= set(res)
+    assert res["_provenance"]["tool"] == "compare_models"
     assert res["screening_agreement"]["flag_overlap"] == 1.0  # identical models, same ensemble
 
     # promotion decisions must trace to exact model bytes: both artifacts checksummed as inputs
     with open(out_dir / "run_manifest.json") as f:
         manifest = json.load(f)
+    assert manifest["tool"] == "compare_models"
+    assert set(manifest["artifacts"]) == {"model_comparison.json", "model_comparison.md"}
+    assert {entry["origin"] for entry in manifest["artifacts"].values()} == {"generated"}
+    assert set(manifest["inputs"]) == {"model_a", "model_b", "data", "trajectories"}
+    assert {entry["origin"] for entry in manifest["inputs"].values()} == {"consumed"}
     assert manifest["inputs"]["model_a"]["sha256"]
     assert manifest["inputs"]["model_b"]["sha256"]
     assert manifest["inputs"]["trajectories"]["sha256"]

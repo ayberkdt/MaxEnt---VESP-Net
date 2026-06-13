@@ -101,9 +101,9 @@ def evaluate_false_negatives(
 
     high_threshold = float(torch.quantile(err, q))
     is_high = err >= high_threshold
-    flagged_mask = torch.zeros(n_total, dtype=torch.bool)
+    flagged_mask = torch.zeros(n_total, dtype=torch.bool, device=err.device)
     if flagged:
-        flagged_mask[torch.tensor(flagged)] = True
+        flagged_mask[torch.tensor(flagged, device=err.device)] = True
     accepted_mask = ~flagged_mask
 
     n_high = int(is_high.sum())
@@ -117,7 +117,7 @@ def evaluate_false_negatives(
     # Sentinel estimate: high-error rate among the audited accepted sample.
     n_sentinel = len(sentinel)
     if n_sentinel > 0:
-        sentinel_high = is_high[torch.tensor(sentinel)]
+        sentinel_high = is_high[torch.tensor(sentinel, device=err.device)]
         n_sentinel_high = int(sentinel_high.sum())
         sentinel_fn_rate = n_sentinel_high / n_sentinel
         sentinel_high_indices = [sentinel[i] for i in range(n_sentinel) if bool(sentinel_high[i])]

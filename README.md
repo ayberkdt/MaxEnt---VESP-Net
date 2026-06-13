@@ -57,9 +57,9 @@ Implemented in the `vesp.uq` layer: the exact linear-Gaussian source posterior a
 predictive acceleration-error covariance `Sigma_a(x)`** (`VESPUQPlugin.predict_covariance_3x3`).
 
 Not implemented yet: full nonlinear/variational Bayesian posterior; neural source-density network;
-**orbit/state covariance propagation** that consumes `Sigma_a(x)` through an integrator (the
-*local* force-error covariance is implemented; propagating it into a state covariance is not);
-irregular-body source placement.
+**validated operational** orbit/state covariance realism; irregular-body source placement.
+Exploratory MC and linearized STM tools do propagate the fitted force-error posterior into
+orbit-level dispersion/covariance, but they are not validated orbit-determination products.
 
 The binding policy on what may and may not be claimed is
 [`docs/SCIENTIFIC_CLAIMS.md`](docs/SCIENTIFIC_CLAIMS.md).
@@ -156,9 +156,10 @@ The full lifecycle is also drivable from a PyQt6 desktop app:
 python ui/app_vespuq.py
 ```
 
-Seven pages — **Dashboard** (models/runs overview), **Train** (configure + launch a training run
+Eight pages — **Dashboard** (models/runs overview), **Train** (configure + launch a training run
 with live logs and a calibration result panel), **Screen** (serve a persisted model over a
 generated ensemble or an external CSV, with policy overrides and a flagged-trajectory table),
+**Compare** (model promotion/drift report with calibration and screening agreement),
 **Propagate** (STM/MC force-error covariance propagation with the position-sigma growth plot and
 the exploratory-not-validated caveat in-page), **Model** (provenance, packaged decision policy,
 model card, and the uncertainty-vs-altitude profile), **Update** (exact sequential update with
@@ -307,7 +308,8 @@ scripts/         dataset builders, benchmarks, and orchestration helpers
                  compare_models.py / build_iac_pack.py / benchmark_gpu.py / benchmark_stm_dispersion.py
 benchmarks/      curated benchmark result docs (see benchmarks/README.md)
 docs/            SCIENTIFIC_CLAIMS.md + VESP_UQ_IAC_PLAN.md + VESP_UQ_LIMITATIONS.md
-                 + VESP_UQ_NEXT_STEPS.md (roadmap with N-item statuses)
+                 + VESP_UQ_NEXT_STEPS.md (implementation history + research backlog)
+                 + VESP_SYSTEM_HARDENING_PLAN.md (completed H1-H8 hardening audit)
 tests/           pytest suite
 CHANGELOG.md     versioned release notes (semver on the `vesp` package surface)
 data/            input gravity models and prepared residual CSVs
@@ -321,7 +323,7 @@ Intra-package imports use absolute `vesp.*` paths (e.g.
 `run_feasibility.py` are convenience wrappers that delegate to the matching
 `vesp.training.*` module.
 
-## Current Scope: Stage 1-2 Only
+## Deterministic Core Scope
 
 Stage 1 uses fixed single-shell equivalent sources:
 
@@ -492,6 +494,16 @@ The package uses a `src/` layout and is installed in editable mode so that the
 ```powershell
 pip install -r requirements.txt
 pip install -e .
+```
+
+For the same lint, typecheck, and test tools used by CI, install the development extra and run
+the scoped checks:
+
+```powershell
+python -m pip install -e ".[dev]"
+python -m ruff check src/vesp/uq src/vesp/common src/vesp/ui ui scripts tests
+python -m mypy src/vesp/uq src/vesp/common src/vesp/ui
+python -m pytest -q
 ```
 
 ## Experiment Framework
@@ -1028,9 +1040,13 @@ Each completed run writes:
 run_manifest.json
 ```
 
-The manifest records config, compact metrics, generated artifacts, file sizes,
-and SHA-256 checksums so later MaxEnt comparisons can be traced back to the
-exact run outputs.
+The shared manifest schema records config, compact metrics, produced artifacts,
+and consumed inputs. Every file entry has a path and an origin
+(`generated`, `prewritten`, or `consumed`), plus SHA-256 and byte size when the
+file exists. Missing files use `missing: true`; publication artifacts may also
+carry a machine-readable status such as `ok` or `missing_data`. This keeps
+training, screening, benchmark, comparison, and evidence-pack outputs traceable
+through the same contract.
 
 ## Dense Operator Limit
 

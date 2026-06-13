@@ -764,6 +764,7 @@ def run_gpu_batch_compare_mode(args: argparse.Namespace, cfg_base: SimConfig, ep
             current_step: int, total_steps: int, elapsed_s: float,
             _name: str = task.display_name, _idx: int = model_idx,
             _state: dict[str, float] = cb_state,
+            _n_scenarios: int = len(model_scenarios),
         ) -> None:
             stats = progress.compute_step_stats(current_step, total_steps, elapsed_s)
             # steps/s over the most recent window (ignores one-off warmup such as
@@ -789,7 +790,7 @@ def run_gpu_batch_compare_mode(args: argparse.Namespace, cfg_base: SimConfig, ep
                 percent=stats["percent"], elapsed_s=elapsed_s,
                 eta_s=model_eta, steps_per_s=rate,
                 device=str(device), dtype=str(args.torch_dtype),
-                n_scenarios=len(model_scenarios),
+                n_scenarios=_n_scenarios,
             )
             model_frac = stats["current_step"] / max(1, stats["total_steps"])
             gpu_frac = ((_idx - 1) + model_frac) / n_gpu_models

@@ -8,7 +8,6 @@ config's generated ensemble) + optional decision-policy overrides. Results are r
 from __future__ import annotations
 
 import csv
-import json
 from datetime import datetime
 from pathlib import Path
 
@@ -29,9 +28,20 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from vesp.ui.jobs import ProcessJob, open_file, open_in_file_manager
+from vesp.ui.helpers import safe_read_json
+from vesp.ui.jobs import ProcessJob
 from vesp.ui.paths import OUTPUTS_DIR, list_configs, list_models
-from vesp.ui.widgets import Card, KpiTile, LogConsole, PageHeader, PathPicker, StatusChip, make_button
+from vesp.ui.widgets import (
+    Card,
+    KpiTile,
+    LogConsole,
+    ModelArtifactPicker,
+    PageHeader,
+    PathPicker,
+    RunOutputActions,
+    StatusChip,
+    make_button,
+)
 
 MODEL_DEFAULT = "(model policy)"
 SCORING_MODES = (
@@ -63,7 +73,7 @@ class ScreenPage(QWidget):
             "policy applies unless overridden. No refitting; force-risk / OOD only.",
         )
         self.status = StatusChip("idle")
-        header.actions.addWidget(self.status)
+        header.add_action(self.status)
         root.addWidget(header)
 
         split = QSplitter()
@@ -77,13 +87,10 @@ class ScreenPage(QWidget):
         col.setSpacing(12)
 
         model_card = Card("Model artifact")
-        self.model_combo = QComboBox()
-        self.model_picker = PathPicker("custom vespuq_plugin.pt", name_filter="VESP-UQ model (*.pt)")
-        self.model_combo.currentIndexChanged.connect(
-            lambda _i: self.model_picker.setVisible(self.model_combo.currentData() == "")
-        )
-        model_card.add(self.model_combo)
-        model_card.add(self.model_picker)
+        self.model_selector = ModelArtifactPicker()
+        self.model_combo = self.model_selector.combo
+        self.model_picker = self.model_selector.custom_picker
+        model_card.add(self.model_selector)
         col.addWidget(model_card)
 
         source_card = Card("Trajectory source")
@@ -161,23 +168,23 @@ class ScreenPage(QWidget):
         for tile in (self.kpi_flagged, self.kpi_policy, self.kpi_speed):
             tiles.addWidget(tile)
         result_card.add_layout(tiles)
-        buttons = QHBoxLayout()
-        self.open_dir = make_button("Open run folder", variant="ghost", on_click=self._open_dir)
-        self.open_report = make_button("Open report", variant="ghost", on_click=self._open_report)
-        for b in (self.open_dir, self.open_report):
-            b.setEnabled(False)
-            buttons.addWidget(b)
-        buttons.addStretch(1)
-        result_card.add_layout(buttons)
+        self.output_actions = RunOutputActions(report_name="screening_report.md")
+        self.open_dir = self.output_actions.open_dir
+        self.open_report = self.output_actions.open_report
+        result_card.add(self.output_actions)
         rcol.addWidget(result_card)
 
         table_card = Card("Trajectory scores (top risk first)")
         self.table = QTableWidget(0, len(SCORE_COLUMNS))
         self.table.setHorizontalHeaderLabels(SCORE_COLUMNS)
-        self.table.verticalHeader().setVisible(False)
+        vertical_header = self.table.verticalHeader()
+        if vertical_header is not None:
+            vertical_header.setVisible(False)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.table.setAlternatingRowColors(True)
-        self.table.horizontalHeader().setStretchLastSection(True)
+        horizontal_header = self.table.horizontalHeader()
+        if horizontal_header is not None:
+            horizontal_header.setStretchLastSection(True)
         table_card.add(self.table)
         rcol.addWidget(table_card, 1)
 
@@ -199,28 +206,14 @@ class ScreenPage(QWidget):
         self.config_combo.setEnabled(not csv_mode)
 
     def refresh_models(self) -> None:
-        current = self.model_combo.currentData()
-        self.model_combo.blockSignals(True)
-        self.model_combo.clear()
-        for path in list_models():
-            self.model_combo.addItem(f"{path.parent.name}/{path.name}", str(path))
-        self.model_combo.addItem("Browse...", "")
-        if current:
-            index = self.model_combo.findData(current)
-            if index >= 0:
-                self.model_combo.setCurrentIndex(index)
-        self.model_combo.blockSignals(False)
-        self.model_picker.setVisible(self.model_combo.currentData() == "")
+        self.model_selector.refresh(list_models())
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
         self.refresh_models()
 
     def _selected_model(self) -> Path | None:
-        data = self.model_combo.currentData()
-        if data:
-            return Path(data)
-        return self.model_picker.path()
+        return self.model_selector.selected_path()
 
     # ------------------------------------------------------------------ launch
     def _run(self) -> None:
@@ -258,6 +251,7 @@ class ScreenPage(QWidget):
 
         stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         self._out_dir = OUTPUTS_DIR / f"ui_screen_{stamp}"
+        self.output_actions.set_output(self._out_dir)
         args += ["--out", str(self._out_dir)]
 
         self.console.clear()
@@ -266,8 +260,7 @@ class ScreenPage(QWidget):
         self.run_button.setEnabled(False)
         self.cancel_button.setEnabled(True)
         self.progress.setRange(0, 0)
-        for b in (self.open_dir, self.open_report):
-            b.setEnabled(False)
+        self.output_actions.set_actions_enabled(False)
         self.job.start_module("vesp.uq.screen", args)
 
     # ------------------------------------------------------------------ results
@@ -284,11 +277,10 @@ class ScreenPage(QWidget):
         if self._out_dir is None:
             return
         report_path = self._out_dir / "screening_report.json"
-        try:
-            report = json.loads(report_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as exc:
+        report, error = safe_read_json(report_path)
+        if report is None:
             self.status.set_state("report missing", "danger")
-            self.console.append_line(f"[ui] failed to read {report_path}: {exc}")
+            self.console.append_line(f"[ui] failed to read {report_path}: {error}")
             return
 
         sc = report.get("screening", {})
@@ -307,8 +299,7 @@ class ScreenPage(QWidget):
         self.kpi_speed.set(f"{us:.1f} us/pt" if isinstance(us, (int, float)) else "--", "no refit; scoring only")
 
         self._fill_table()
-        for b in (self.open_dir, self.open_report):
-            b.setEnabled(True)
+        self.output_actions.set_actions_enabled(True)
 
     def _fill_table(self) -> None:
         self.table.setRowCount(0)
@@ -334,11 +325,3 @@ class ScreenPage(QWidget):
                     item.setBackground(accent)
                 self.table.setItem(row, col, item)
         self.table.resizeColumnsToContents()
-
-    def _open_dir(self) -> None:
-        if self._out_dir is not None and self._out_dir.exists():
-            open_in_file_manager(self._out_dir)
-
-    def _open_report(self) -> None:
-        if self._out_dir is not None and (self._out_dir / "screening_report.md").is_file():
-            open_file(self._out_dir / "screening_report.md")

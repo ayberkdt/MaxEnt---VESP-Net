@@ -1,0 +1,155 @@
+{
+  "altitude_noise_a": 2.194211809844802e-12,
+  "altitude_noise_b": 3.6972379396765698,
+  "conformal_alpha": 0.1,
+  "conformal_apply": true,
+  "conformal_band_scales": {
+    "high": 0.40981551752067386,
+    "low": 1.687214445937472,
+    "mid": 0.9009234400682289
+  },
+  "conformal_coverage_after": 0.9090909090909091,
+  "conformal_coverage_before": 0.9155844155844156,
+  "conformal_mode": "norm",
+  "conformal_scale": 0.8945661283751243,
+  "conformal_scope": "per_band",
+  "covariance_mode": "exact",
+  "domain_angular_weight": 0.0,
+  "domain_backend": "torch",
+  "domain_distance_weight": 1.0,
+  "domain_k": 8,
+  "domain_radial_weight": 1.0,
+  "domain_scale": 0.3993424884627528,
+  "domain_support_components": [
+    "distance_score",
+    "radius_penalty",
+    "angular_score",
+    "total_score"
+  ],
+  "domain_support_enabled": true,
+  "domain_weight": 1.0,
+  "lambda_l2": 10.0,
+  "lcurve": [
+    {
+      "curvature": 0.0,
+      "lambda_l2": 1e-10,
+      "log_residual": -11.853257160379641,
+      "log_solution": -0.7309499761291309,
+      "residual_norm": 7.1153427096480625e-06,
+      "solution_norm": 0.4814514054348654
+    },
+    {
+      "curvature": 0.2857484333470054,
+      "lambda_l2": 1e-08,
+      "log_residual": -11.150634885605264,
+      "log_solution": -1.9901960244507053,
+      "residual_norm": 1.4366163323764528e-05,
+      "solution_norm": 0.13666863242596625
+    },
+    {
+      "curvature": 0.16808095778574342,
+      "lambda_l2": 1e-06,
+      "log_residual": -10.075681419399492,
+      "log_solution": -2.822512339984262,
+      "residual_norm": 4.2090797856439064e-05,
+      "solution_norm": 0.059456380270287414
+    },
+    {
+      "curvature": 0.13251467487140442,
+      "lambda_l2": 1e-05,
+      "log_residual": -9.27190059040984,
+      "log_solution": -3.229364144710082,
+      "residual_norm": 9.402963208628978e-05,
+      "solution_norm": 0.03958265963173918
+    },
+    {
+      "curvature": 0.077862192177791,
+      "lambda_l2": 0.0001,
+      "log_residual": -8.490372755977527,
+      "log_solution": -3.753416783101794,
+      "residual_norm": 0.0002054366680953288,
+      "solution_norm": 0.023437527941025556
+    },
+    {
+      "curvature": 0.0319461907792173,
+      "lambda_l2": 0.001,
+      "log_residual": -7.8435207997252565,
+      "log_solution": -4.254601683652229,
+      "residual_norm": 0.0003922854479106298,
+      "solution_norm": 0.014198745211705428
+    },
+    {
+      "curvature": 0.037407989042610106,
+      "lambda_l2": 0.01,
+      "log_residual": -7.168987900701476,
+      "log_solution": -4.807007416248786,
+      "residual_norm": 0.0007701017563826221,
+      "solution_norm": 0.008172279370952844
+    },
+    {
+      "curvature": 0.1874256731971111,
+      "lambda_l2": 0.1,
+      "log_residual": -6.583371241569954,
+      "log_solution": -5.31756066224476,
+      "residual_norm": 0.0013831783973860061,
+      "solution_norm": 0.004904703372816394
+    },
+    {
+      "curvature": 0.07384996478976422,
+      "lambda_l2": 1.0,
+      "log_residual": -5.9902723100436095,
+      "log_solution": -5.704240693749767,
+      "residual_norm": 0.0025029823701537817,
+      "solution_norm": 0.0033318062862425645
+    },
+    {
+      "curvature": 0.2860666911422363,
+      "lambda_l2": 3.0,
+      "log_residual": -5.600433091547223,
+      "log_solution": -5.935215259550366,
+      "residual_norm": 0.0036962625497154646,
+      "solution_norm": 0.0026446534063617184
+    },
+    {
+      "curvature": 0.4730179537017206,
+      "lambda_l2": 10.0,
+      "log_residual": -5.133284056365191,
+      "log_solution": -6.317802052682014,
+      "residual_norm": 0.005897162025830687,
+      "solution_norm": 0.0018039040381584671
+    },
+    {
+      "curvature": 0.3969051988008676,
+      "lambda_l2": 30.0,
+      "log_residual": -4.770271767861715,
+      "log_solution": -6.865605078702872,
+      "residual_norm": 0.008478075778313285,
+      "solution_norm": 0.001043051133557219
+    },
+    {
+      "curvature": 0.13865805993391378,
+      "lambda_l2": 100.0,
+      "log_residual": -4.52614096566972,
+      "log_solution": -7.730262022914876,
+      "residual_norm": 0.010822359448871608,
+      "solution_norm": 0.00043932898775727957
+    },
+    {
+      "curvature": 0.0,
+      "lambda_l2": 1000.0,
+      "log_residual": -4.387616473852555,
+      "log_solution": -9.844479893629858,
+      "residual_norm": 0.012430321936283538,
+      "solution_norm": 5.303916825747064e-05
+    }
+  ],
+  "n_sources": 1280,
+  "n_train": 460,
+  "n_val": 154,
+  "noise_model": "heteroscedastic",
+  "noise_std": 0.0002110420069522406,
+  "noise_var": 4.453872869842958e-08,
+  "reg_method": "lcurve",
+  "train_radius_max": 1.5994528099781655,
+  "train_radius_min": 1.030366113108928
+}

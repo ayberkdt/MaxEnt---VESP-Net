@@ -1,0 +1,225 @@
+{
+  "artifacts": {
+    "calibration_by_band_csv": {
+      "bytes": 1591,
+      "path": "C:\\Users\\ayber\\Desktop\\Physics Informed NN\\MaxEnt - VESP Net\\conformal_validation_runs\\vespuq_real_lunar_L90_conformal\\calibration_by_band.csv",
+      "sha256": "c37112de1e5c985588df88eb3e9d760ddb44661ee46696695b909c513f4be2f1"
+    },
+    "fit_summary_json": {
+      "bytes": 4685,
+      "path": "C:\\Users\\ayber\\Desktop\\Physics Informed NN\\MaxEnt - VESP Net\\conformal_validation_runs\\vespuq_real_lunar_L90_conformal\\fit_summary.json",
+      "sha256": "0d914ec8bccf1d96b43848687dd85d16781fbab8fd2ccad0ce299333123277ee"
+    },
+    "flagged_trajectories_csv": {
+      "bytes": 893848,
+      "path": "C:\\Users\\ayber\\Desktop\\Physics Informed NN\\MaxEnt - VESP Net\\conformal_validation_runs\\vespuq_real_lunar_L90_conformal\\flagged_trajectories.csv",
+      "sha256": "3efca5b8bf89c3a6037cf78c34d69228bea877c0bc56240e5d52d5434d43ba1e"
+    },
+    "trajectory_scores_csv": {
+      "bytes": 4258185,
+      "path": "C:\\Users\\ayber\\Desktop\\Physics Informed NN\\MaxEnt - VESP Net\\conformal_validation_runs\\vespuq_real_lunar_L90_conformal\\trajectory_scores.csv",
+      "sha256": "fe8ecfa7aaa96b76734fc57c47153d4191bcb33f12fe2f3c650d1fe5be58e26c"
+    },
+    "vespuq_report_json": {
+      "bytes": 43127,
+      "path": "C:\\Users\\ayber\\Desktop\\Physics Informed NN\\MaxEnt - VESP Net\\conformal_validation_runs\\vespuq_real_lunar_L90_conformal\\vespuq_report.json",
+      "sha256": "5fbfcf4fe3884104e9c84edc563f685345a8746280e3d813e7b595719de6f407"
+    },
+    "vespuq_report_md": {
+      "bytes": 4931,
+      "path": "C:\\Users\\ayber\\Desktop\\Physics Informed NN\\MaxEnt - VESP Net\\conformal_validation_runs\\vespuq_real_lunar_L90_conformal\\vespuq_report.md",
+      "sha256": "e0f9763c70ad2859d7b3ba2430bb8698021fdcf8fcf421225c68ab5f44c9592b"
+    }
+  },
+  "config": {
+    "acceptance": {
+      "max_dominant_shell_energy_fraction": 0.9,
+      "max_low_altitude_rmse_factor": 5.0,
+      "max_relative_acceleration_rmse": 0.75,
+      "max_relative_dipole_leakage": 0.5,
+      "max_relative_monopole_leakage": 0.05,
+      "max_shell_cancellation_ratio": 5.0,
+      "max_sigma_l2": 100.0,
+      "max_top5_source_contribution": 0.4
+    },
+    "body": {
+      "R_body": 1.0,
+      "acceleration_units": "km/s^2",
+      "normalize_positions": true,
+      "physical_R_body": 1738.0,
+      "physical_R_body_units": "km",
+      "position_units": "normalized",
+      "potential_units": "km^2/s^2"
+    },
+    "data": {
+      "format": "residual",
+      "path": "data/lunar_grail_gl0420a_L90_residual.csv",
+      "seed": 42,
+      "train_fraction": 0.6,
+      "type": "csv"
+    },
+    "device": "cpu",
+    "diagnostics": {
+      "shell_collapse_threshold": 0.9,
+      "sigma_l2_warning_threshold": 100.0
+    },
+    "dtype": "float64",
+    "evaluation": {
+      "altitude_bands": {
+        "high": [
+          1.35,
+          1.6
+        ],
+        "low": [
+          1.03,
+          1.15
+        ],
+        "mid": [
+          1.15,
+          1.35
+        ]
+      },
+      "batch_size": 4096,
+      "n_altitude_bins": 6
+    },
+    "kernel": {
+      "acceleration_sign": 1.0,
+      "eps": 0.0,
+      "source_chunk_size": 1024
+    },
+    "loss": {
+      "acceleration_scale": "auto",
+      "altitude_weighting": {
+        "boost": 3.0,
+        "enabled": false,
+        "mode": "low_altitude_boost",
+        "r_threshold": 1.15
+      },
+      "lambda_acceleration": 1.0,
+      "lambda_dipole": 1.0,
+      "lambda_l2": 1e-08,
+      "lambda_moment": 1e-06,
+      "lambda_potential": 0.2,
+      "normalize_targets": false,
+      "potential_scale": "auto",
+      "shell_energy_weights": [],
+      "target_scale_eps": 1e-12,
+      "use_acceleration": true,
+      "use_potential": true
+    },
+    "model": {
+      "n_source": 512,
+      "n_sources_per_shell": [
+        384,
+        512,
+        384
+      ],
+      "shell_alpha": 0.86,
+      "shell_alphas": [
+        0.7,
+        0.86,
+        0.95
+      ],
+      "type": "multishell",
+      "weight_mode": "surface_area"
+    },
+    "output": {
+      "output_dir": "conformal_validation_runs",
+      "run_name": "vespuq_real_lunar_L90_conformal",
+      "save_model": false,
+      "save_plots": false
+    },
+    "seed": 42,
+    "solver": {
+      "column_normalize": true,
+      "lambda_l2": 1e-08,
+      "ridge_method": "augmented_lstsq",
+      "type": "ridge"
+    },
+    "split": {
+      "radius_units": "normalized",
+      "train_fraction": 0.8,
+      "type": "random"
+    },
+    "uq": {
+      "conformal": {
+        "alpha": 0.1,
+        "apply": true,
+        "by_band": true,
+        "min_band_n": 30,
+        "prediction_mode": "norm"
+      },
+      "covariance_mode": "exact",
+      "noise_model": "heteroscedastic",
+      "physical_budget": {
+        "enabled": false,
+        "max_rerun_fraction": null,
+        "scoring": "expected_abs_p95",
+        "units": "m/s^2",
+        "value": null
+      },
+      "regularization": {
+        "lambda_l2": 30.0,
+        "method": "lcurve"
+      },
+      "risk": {
+        "domain_angular_weight": 0.0,
+        "domain_backend": "torch",
+        "domain_distance_weight": 1.0,
+        "domain_k": 8,
+        "domain_radial_weight": 1.0,
+        "domain_support": true,
+        "domain_weight": 1.0,
+        "low_altitude_radius": 1.15,
+        "scoring": "supervisor_rel"
+      },
+      "screening": {
+        "fraction_policy": "topk",
+        "n_orbits": 10000,
+        "n_points": 120,
+        "oracle_source": "heldout",
+        "r_apo_range": [
+          1.4,
+          1.6
+        ],
+        "r_peri_range": [
+          1.03,
+          1.4
+        ],
+        "rerun_fraction": 0.2,
+        "time_weighting": "none",
+        "trajectory_source": "generated",
+        "true_error_aggregator": "p95"
+      },
+      "val_fraction": 0.25
+    }
+  },
+  "created_at_utc": "2026-06-11T16:31:43Z",
+  "inputs": {
+    "dataset_csv": {
+      "bytes": 155146,
+      "path": "data\\lunar_grail_gl0420a_L90_residual.csv",
+      "sha256": "c593a6b1fde57890632753ffa8eab3a7268aa610c4a260070be06684a8fc6760"
+    }
+  },
+  "metrics": {
+    "capture_rate": 0.7290874524714829,
+    "epistemic_grows_at_low_altitude": true,
+    "error_ratio_flagged_to_accepted": 5.225783634110777,
+    "lift_over_random": 3.6454372623574143,
+    "low_band_calibrated_90": true,
+    "low_band_ellipsoid_picp_90": 0.967391304347826,
+    "low_band_picp_90": 0.9746376811594203,
+    "low_high_epistemic_std_ratio": 48.77689677533453,
+    "low_high_pred_sigma_ratio": 68.92655577944683,
+    "n_flagged": 2000,
+    "rerun_fraction": 0.2,
+    "screen_concentrates_error": true,
+    "selection_mode": "fraction",
+    "spearman_risk_vs_error": 0.8683419809234199,
+    "zero_alarms": false
+  },
+  "platform": "Windows-11-10.0.26200-SP0",
+  "python": "3.12.13",
+  "schema_version": "vesp_run_manifest_v1"
+}

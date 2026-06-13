@@ -283,13 +283,13 @@ class GravityModelCache:
                                 "Use --gpu-fallback cpu to fall back to CPU."
                             )
                         print("  [cache] CUDA unavailable; loading ST-LRPS on CPU.", flush=True)
-                except ImportError:
+                except ImportError as exc:
                     fallback = getattr(self._args, "gpu_fallback", "error")
                     if fallback == "error":
                         raise RuntimeError(
                             "CUDA/ST-LRPS GPU mode requested but PyTorch is not installed. "
                             "Install CUDA-enabled PyTorch or use --gpu-fallback cpu."
-                        )
+                        ) from exc
                     print("  [cache] PyTorch not installed; loading ST-LRPS on CPU.", flush=True)
 
             print(f"  [cache] Loading ST-LRPS model from {self._args.st_lrps_model_dir} "

@@ -42,6 +42,7 @@ from vesp.extensions.probabilistic import (
     _safe_cholesky,
     calibration_metrics,
 )
+from vesp.uq.conformal import fit_conformal_scale
 from vesp.uq.domain_support import (
     domain_support_components as _domain_support_components,
 )
@@ -60,10 +61,11 @@ from vesp.uq.scoring import (
 )
 
 COVARIANCE_MODES = ("exact", "diagonal", "lowrank")
+PREDICTIVE_CONFORMAL_MODES = ("norm", "component_max")
 
 # Versioned on-disk format for a fitted plugin (see VESPUQPlugin.save / .load).
 PLUGIN_STATE_FORMAT = "vesp.uq.plugin"
-PLUGIN_STATE_VERSION = 1
+PLUGIN_STATE_VERSION = 2
 
 
 @dataclass
@@ -134,6 +136,12 @@ class VESPUQPlugin:
         covariance_mode: str = "exact",
         lowrank_rank: int = 64,
         val_fraction: float = 0.25,
+        conformal_apply: bool = False,
+        conformal_alpha: float = 0.10,
+        conformal_mode: str = "norm",
+        conformal_by_band: bool = False,
+        conformal_bands: dict | None = None,
+        conformal_min_band_n: int = 30,
         low_altitude_radius: float = 1.15,
         risk_scoring: str = "max",
         sigma_threshold: float | None = None,
@@ -157,6 +165,13 @@ class VESPUQPlugin:
             raise ValueError(f"covariance_mode must be one of {COVARIANCE_MODES}")
         if query_chunk_size is not None and int(query_chunk_size) <= 0:
             raise ValueError("query_chunk_size must be a positive int or None")
+        conformal_mode = str(conformal_mode).lower()
+        if conformal_mode not in PREDICTIVE_CONFORMAL_MODES:
+            raise ValueError(f"conformal_mode must be one of {PREDICTIVE_CONFORMAL_MODES}")
+        if not 0.0 < float(conformal_alpha) < 1.0:
+            raise ValueError("conformal_alpha must be in (0, 1)")
+        if int(conformal_min_band_n) <= 0:
+            raise ValueError("conformal_min_band_n must be positive")
         self.covariance_mode = covariance_mode
         self.lowrank_rank = int(lowrank_rank)
         self._cov_eig: tuple[torch.Tensor, torch.Tensor] | None = None
@@ -171,6 +186,17 @@ class VESPUQPlugin:
         self.lambda_l2 = float(lambda_l2)
         self.noise_model = noise_model
         self.val_fraction = float(val_fraction)
+        self.conformal_apply = bool(conformal_apply)
+        self.conformal_alpha = float(conformal_alpha)
+        self.conformal_mode = conformal_mode
+        self.conformal_by_band = bool(conformal_by_band)
+        self.conformal_bands = {
+            str(name): [float(rng[0]), float(rng[1])]
+            for name, rng in (conformal_bands or {}).items()
+            if rng is not None
+        }
+        self.conformal_min_band_n = int(conformal_min_band_n)
+        self.conformal_calibration: dict | None = None
         self.low_altitude_radius = float(low_altitude_radius)
         self.risk_scoring = risk_scoring
         self.sigma_threshold = sigma_threshold
@@ -240,6 +266,8 @@ class VESPUQPlugin:
         risk = uq.get("risk", {})
         bands = config.get("evaluation", {}).get("altitude_bands", {}) or {}
         low_band = bands.get("low") or [1.03, 1.15]
+        conformal = uq.get("conformal", {}) or {}
+        conformal_bands = conformal.get("bands") or bands
         return cls(
             sources,
             eps=float(kernel.get("eps", kernel.get("softening", 0.0))),
@@ -252,6 +280,12 @@ class VESPUQPlugin:
             covariance_mode=str(uq.get("covariance_mode", "exact")).lower(),
             lowrank_rank=int(uq.get("lowrank_rank", 64)),
             val_fraction=float(uq.get("val_fraction", 0.25)),
+            conformal_apply=bool(conformal.get("apply", False)),
+            conformal_alpha=float(conformal.get("alpha", 0.10)),
+            conformal_mode=str(conformal.get("prediction_mode", conformal.get("mode", "norm"))).lower(),
+            conformal_by_band=bool(conformal.get("by_band", conformal.get("per_band", False))),
+            conformal_bands=conformal_bands,
+            conformal_min_band_n=int(conformal.get("min_band_n", 30)),
             low_altitude_radius=float(risk.get("low_altitude_radius", low_band[1])),
             risk_scoring=str(risk.get("scoring", "max")).lower(),
             sigma_threshold=risk.get("sigma_threshold"),
@@ -286,22 +320,26 @@ class VESPUQPlugin:
             source_chunk_size=self.source_chunk_size,
         )
 
-    def _require_fitted(self) -> None:
-        if self.posterior is None:
+    def _require_fitted(self) -> LinearGaussianPosterior:
+        posterior = self.posterior
+        if posterior is None:
             raise RuntimeError("VESPUQPlugin is not fitted; call fit(...) first")
+        return posterior
 
     def _point_noise(self, radii: torch.Tensor) -> torch.Tensor | float:
         """Aleatoric noise variance per row/point: global floor + altitude excess if het."""
 
+        posterior = self._require_fitted()
         if self.altitude_noise is None:
-            return self.posterior.noise_var
-        return self.posterior.noise_var + self.altitude_noise.variance(radii)
+            return posterior.noise_var
+        return posterior.noise_var + self.altitude_noise.variance(radii)
 
     def _cov_eigpairs(self) -> tuple[torch.Tensor, torch.Tensor]:
         """Top-``lowrank_rank`` eigenpairs of the posterior covariance (cached after fit)."""
 
+        posterior = self._require_fitted()
         if self._cov_eig is None:
-            vals, vecs = torch.linalg.eigh(self.posterior.cov)  # ascending
+            vals, vecs = torch.linalg.eigh(posterior.cov)  # ascending
             k = min(self.lowrank_rank, int(vals.numel()))
             self._cov_eig = (vals[-k:].clamp_min(0.0), vecs[:, -k:])
         return self._cov_eig
@@ -313,20 +351,22 @@ class VESPUQPlugin:
         correlations -> O(m*n) instead of O(m*n^2)); ``lowrank`` uses the top-k eigenpairs.
         """
 
+        posterior = self._require_fitted()
         if self.covariance_mode == "diagonal":
-            diag = torch.diagonal(self.posterior.cov)
+            diag = torch.diagonal(posterior.cov)
             return ((operator * operator) @ diag).clamp_min(0.0)
         if self.covariance_mode == "lowrank":
             vals, vecs = self._cov_eigpairs()
             proj = operator @ vecs
             return ((proj * proj) @ vals).clamp_min(0.0)
-        cov_q = operator @ self.posterior.cov
+        cov_q = operator @ posterior.cov
         return torch.sum(cov_q * operator, dim=-1).clamp_min(0.0)
 
     def _predict_rows(self, operator: torch.Tensor, radii: torch.Tensor) -> dict[str, torch.Tensor]:
         """Row-level (3N) predictive mean/variance honoring noise model + covariance mode."""
 
-        mean = operator @ self.posterior.mean
+        posterior = self._require_fitted()
+        mean = operator @ posterior.mean
         epistemic = self._epistemic_variance(operator)
         variance = epistemic + self._point_noise(radii)
         return {
@@ -343,6 +383,146 @@ class VESPUQPlugin:
         if size is None or n <= size:
             return [(0, n)]
         return [(start, min(start + size, n)) for start in range(0, n, size)]
+
+    def _conformal_scale_for_radius(self, radius: torch.Tensor) -> torch.Tensor | None:
+        """Per-query predictive-std scale, or ``None`` when operational conformal is off."""
+
+        cal = self.conformal_calibration
+        if not cal or not cal.get("enabled", False):
+            return None
+        scale = torch.full_like(radius, float(cal["global"]["scale"]))
+        for band in cal.get("bands", []):
+            if not band.get("used", True) or "scale" not in band:
+                continue
+            lo, hi = float(band["radius_range"][0]), float(band["radius_range"][1])
+            mask = (radius >= lo) & (radius <= hi)
+            if bool(mask.any()):
+                scale[mask] = float(band["scale"])
+        return scale
+
+    def _apply_conformal_to_std(
+        self,
+        std_components: torch.Tensor,
+        sigma: torch.Tensor,
+        radius: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Scale predictive standard deviations when operational conformal is enabled."""
+
+        scale = self._conformal_scale_for_radius(radius)
+        if scale is None:
+            return std_components, sigma
+        return std_components * scale.unsqueeze(-1), sigma * scale
+
+    def _apply_conformal_to_covariance(self, covariance: torch.Tensor, radius: torch.Tensor) -> torch.Tensor:
+        """Scale predictive covariance by ``scale^2`` when operational conformal is enabled."""
+
+        scale = self._conformal_scale_for_radius(radius)
+        if scale is None:
+            return covariance
+        return covariance * scale.square().reshape(-1, 1, 1)
+
+    def fit_conformal_calibration(self, positions, error, *, altitude_bands: dict | None = None) -> dict:
+        """Fit the opt-in operational conformal scale on held-out force-error samples.
+
+        The learned scale multiplies predictive standard deviations. If ``conformal_by_band`` is
+        enabled, in-band queries use their band scale and all extrapolated / under-populated regions
+        fall back to the global scale.
+        """
+
+        self._require_fitted()
+        if not self.conformal_apply:
+            self.conformal_calibration = None
+            return {"enabled": False, "apply": False}
+
+        positions = self._prep_positions(positions)
+        error = self._prep_positions(error)
+        if positions.shape != error.shape:
+            raise ValueError("positions and error must have the same (N, 3) shape")
+        if positions.shape[0] == 0:
+            raise ValueError("conformal calibration requires at least one held-out sample")
+
+        previous = self.conformal_calibration
+        self.conformal_calibration = None
+        try:
+            cov = self.predict_covariance_3x3(positions)
+        except Exception:
+            self.conformal_calibration = previous
+            raise
+
+        residual = error - cov.mean_error
+        predicted = cov.std_components if self.conformal_mode == "component_max" else cov.sigma
+        global_cal = fit_conformal_scale(
+            predicted,
+            residual,
+            alpha=self.conformal_alpha,
+            mode=self.conformal_mode,
+        )
+        radius = torch.linalg.norm(positions, dim=-1)
+        bands_out: list[dict] = []
+        if self.conformal_by_band:
+            for name, rng in (altitude_bands or self.conformal_bands).items():
+                if rng is None:
+                    continue
+                lo, hi = float(rng[0]), float(rng[1])
+                mask = (radius >= lo) & (radius <= hi)
+                n_band = int(mask.sum().detach().cpu())
+                if n_band < self.conformal_min_band_n:
+                    bands_out.append(
+                        {
+                            "name": str(name),
+                            "radius_range": [lo, hi],
+                            "n_calibration": n_band,
+                            "used": False,
+                            "reason": f"n < min_band_n ({self.conformal_min_band_n})",
+                        }
+                    )
+                    continue
+                band_predicted = predicted[mask]
+                band_residual = residual[mask]
+                band_cal = fit_conformal_scale(
+                    band_predicted,
+                    band_residual,
+                    alpha=self.conformal_alpha,
+                    mode=self.conformal_mode,
+                )
+                band_dict = band_cal.to_dict()
+                band_dict.update(
+                    {
+                        "name": str(name),
+                        "radius_range": [lo, hi],
+                        "used": True,
+                    }
+                )
+                bands_out.append(band_dict)
+
+        self.conformal_calibration = {
+            "enabled": True,
+            "apply": True,
+            "alpha": self.conformal_alpha,
+            "mode": self.conformal_mode,
+            "scope": "per_band" if self.conformal_by_band else "global",
+            "min_band_n": self.conformal_min_band_n,
+            "global": global_cal.to_dict(),
+            "bands": bands_out,
+            "extrapolation_rule": "queries outside a fitted band use the global conformal scale",
+        }
+        self.fit_info.update(
+            {
+                "conformal_apply": True,
+                "conformal_mode": self.conformal_mode,
+                "conformal_alpha": self.conformal_alpha,
+                "conformal_scope": self.conformal_calibration["scope"],
+                "conformal_scale": float(global_cal.scale),
+                "conformal_coverage_before": float(global_cal.coverage_before),
+                "conformal_coverage_after": float(global_cal.coverage_after),
+                "conformal_stale_after_update": False,
+            }
+        )
+        if bands_out:
+            self.fit_info["conformal_band_scales"] = {
+                b["name"]: b.get("scale") for b in bands_out if b.get("used")
+            }
+        return self.conformal_calibration
 
     # ------------------------------------------------------------------ fitting
     def fit(
@@ -387,7 +567,10 @@ class VESPUQPlugin:
 
         positions = self._prep_positions(positions)
         error = self._prep_positions(error)
+        self.conformal_calibration = None
 
+        if (val_positions is None) != (val_error is None):
+            raise ValueError("supply both val_positions and val_error (or neither)")
         if val_positions is None:
             generator = torch.Generator().manual_seed(self.seed)
             n = positions.shape[0]
@@ -398,6 +581,7 @@ class VESPUQPlugin:
             val_pos = positions[val_idx] if n_val > 0 else None
             val_err = error[val_idx] if n_val > 0 else None
         else:
+            assert val_error is not None
             train_pos, train_err = positions, error
             val_pos = self._prep_positions(val_positions)
             val_err = self._prep_positions(val_error)
@@ -432,6 +616,7 @@ class VESPUQPlugin:
             # noise floor from HELD-OUT residuals (honest), falling back to the training fit
             noise_var = None
             if val_pos is not None:
+                assert val_err is not None
                 tmp = LinearGaussianPosterior.fit(operator, target, lambda_l2=lambda_used)
                 val_resid = tmp.predict(self._operator(val_pos), include_noise=False)["mean"] - _flatten_acc(val_err)
                 noise_var = float(torch.mean(val_resid * val_resid).detach().cpu())
@@ -444,6 +629,7 @@ class VESPUQPlugin:
         # --- Step 5: altitude-dependent heteroscedastic recalibration on held-out residuals ---
         self.altitude_noise = None
         if self.noise_model == "heteroscedastic" and val_pos is not None:
+            assert val_err is not None
             val_op = self._operator(val_pos)
             val_pred = posterior.predict(val_op, include_noise=False)
             val_resid = val_pred["mean"] - _flatten_acc(val_err)
@@ -483,6 +669,10 @@ class VESPUQPlugin:
             self.fit_info["altitude_noise_b"] = self.altitude_noise.b
         if lcurve_points is not None:
             self.fit_info["lcurve"] = lcurve_points
+        if self.conformal_apply:
+            if val_pos is None or val_err is None:
+                raise ValueError("conformal_apply=True requires held-out validation samples")
+            self.fit_conformal_calibration(val_pos, val_err)
         return self
 
     # ------------------------------------------------------------------ sequential update
@@ -512,7 +702,7 @@ class VESPUQPlugin:
         nearest-neighbour scales are invalidated and recomputed lazily).
         """
 
-        self._require_fitted()
+        posterior = self._require_fitted()
         positions = self._prep_positions(positions)
         error = self._prep_positions(error)
         if positions.shape[0] == 0:
@@ -520,16 +710,16 @@ class VESPUQPlugin:
         if positions.shape != error.shape:
             raise ValueError("positions and error must have the same (N, 3) shape")
 
-        noise_var = self.posterior.noise_var
-        lambda_used = self.posterior.lambda_l2
+        noise_var = posterior.noise_var
+        lambda_used = posterior.lambda_l2
 
         # Recover the posterior precision (up to the noise scale) from the stored covariance.
-        chol_cov = torch.linalg.cholesky(self.posterior.cov)
+        chol_cov = torch.linalg.cholesky(posterior.cov)
         m1 = noise_var * torch.cholesky_inverse(chol_cov)
         a2 = self._operator(positions)
         b2 = _flatten_acc(error)
         m2 = m1 + a2.transpose(-1, -2) @ a2
-        rhs = m1 @ self.posterior.mean + a2.transpose(-1, -2) @ b2
+        rhs = m1 @ posterior.mean + a2.transpose(-1, -2) @ b2
         chol2 = _safe_cholesky(m2, jitter=1.0e-10)
         mean2 = torch.cholesky_solve(rhs.unsqueeze(-1), chol2).squeeze(-1)
 
@@ -555,6 +745,8 @@ class VESPUQPlugin:
         self._cov_eig = None
 
         # Extend the domain-support geometry; the new samples are calibration support now.
+        if self.train_positions is None:
+            raise RuntimeError("fitted plugin is missing stored training positions")
         self.train_positions = torch.cat([self.train_positions, positions.detach()], dim=0)
         self.train_radii = torch.linalg.norm(self.train_positions, dim=-1).detach()
         self._domain_scale = None
@@ -562,6 +754,7 @@ class VESPUQPlugin:
         self._domain_angular_scale = None
 
         if val_pos is not None:
+            assert val_err is not None
             self.val_positions = val_pos.detach()
             self.val_radii = torch.linalg.norm(val_pos, dim=-1).detach()
             if self.noise_model == "heteroscedastic":
@@ -586,6 +779,11 @@ class VESPUQPlugin:
             if self.altitude_noise is not None:
                 self.fit_info["altitude_noise_a"] = self.altitude_noise.a
                 self.fit_info["altitude_noise_b"] = self.altitude_noise.b
+            if self.conformal_apply:
+                self.fit_conformal_calibration(val_pos, val_err)
+        elif self.conformal_apply and self.conformal_calibration:
+            self.fit_info["conformal_stale_after_update"] = True
+            self.fit_info["conformal_stale_reason"] = "update_error called without fresh validation data"
         return self
 
     # ------------------------------------------------------------------ prediction
@@ -634,6 +832,7 @@ class VESPUQPlugin:
         std3 = torch.sqrt(var3.clamp_min(0.0))
         sigma = torch.sqrt(var3.sum(dim=1).clamp_min(0.0))
         epistemic_sigma = torch.sqrt(epi3.sum(dim=1).clamp_min(0.0))
+        std3, sigma = self._apply_conformal_to_std(std3, sigma, radius)
 
         # Posterior-mean residual magnitude (expected surrogate bias) and the combined
         # expected-error point estimate sqrt(bias^2 + spread^2). These feed the stronger
@@ -683,6 +882,7 @@ class VESPUQPlugin:
     def _predict_covariance_block(self, positions: torch.Tensor, *, operator: torch.Tensor | None = None) -> CovariancePrediction:
         """Single-block ``3x3`` covariance prediction (``positions`` already validated/prepped)."""
 
+        posterior = self._require_fitted()
         n = positions.shape[0]
         op = operator if operator is not None else self._operator(positions)
         opx, opy, opz = op[:n], op[n : 2 * n], op[2 * n :]
@@ -690,7 +890,7 @@ class VESPUQPlugin:
 
         zeros = torch.zeros(n, dtype=self.dtype, device=self.device)
         if self.covariance_mode == "diagonal":
-            diag = torch.diagonal(self.posterior.cov)
+            diag = torch.diagonal(posterior.cov)
             cxx = ((opx * opx) @ diag).clamp_min(0.0)
             cyy = ((opy * opy) @ diag).clamp_min(0.0)
             czz = ((opz * opz) @ diag).clamp_min(0.0)
@@ -704,7 +904,7 @@ class VESPUQPlugin:
                     return (a * b) @ vals
 
             else:  # exact
-                tx, ty, tz = opx @ self.posterior.cov, opy @ self.posterior.cov, opz @ self.posterior.cov
+                tx, ty, tz = opx @ posterior.cov, opy @ posterior.cov, opz @ posterior.cov
 
                 def _dot(a, b):
                     # a is (N,n) already multiplied by cov; b is the raw operator block (N,n)
@@ -731,8 +931,9 @@ class VESPUQPlugin:
         cov[:, 0, 1] = cov[:, 1, 0] = cxy
         cov[:, 0, 2] = cov[:, 2, 0] = cxz
         cov[:, 1, 2] = cov[:, 2, 1] = cyz
+        cov = self._apply_conformal_to_covariance(cov, radius)
 
-        mean3 = (op @ self.posterior.mean).reshape(3, n).transpose(0, 1)
+        mean3 = (op @ posterior.mean).reshape(3, n).transpose(0, 1)
         diag = torch.diagonal(cov, dim1=-2, dim2=-1)  # (N, 3)
         std_components = torch.sqrt(diag.clamp_min(0.0))
         sigma = torch.sqrt(diag.sum(dim=1).clamp_min(0.0))
@@ -768,9 +969,12 @@ class VESPUQPlugin:
     def _domain_angular_nn_scale(self, k: int, *, subset: int = 512) -> float:
         """Robust angular spacing: median ``k``-th nearest training-direction angle (radians)."""
 
+        train_positions = self.train_positions
+        if train_positions is None:
+            raise RuntimeError("domain support needs a fit; train positions are not stored")
         if self._domain_angular_scale is None:
             self._domain_angular_scale = median_angular_scale(
-                self.train_positions, k, seed=self.seed + 1, subset=subset
+                train_positions, k, seed=self.seed + 1, subset=subset
             )
         return self._domain_angular_scale
 
@@ -796,15 +1000,17 @@ class VESPUQPlugin:
         Chunked over queries so it stays cheap even for large ensembles.
         """
 
-        if self.train_positions is None:
+        train_positions = self.train_positions
+        train_radii = self.train_radii
+        if train_positions is None or train_radii is None:
             raise RuntimeError("domain support needs a fit; call fit(...)/fit_error(...) first")
         k = int(self.domain_k if k is None else k)
         pos = self._prep_positions(positions)
         want_angular = self.domain_angular_weight > 0.0
         return _domain_support_components(
             pos,
-            self.train_positions,
-            self.train_radii,
+            train_positions,
+            train_radii,
             k=k,
             distance_scale=self._domain_nn_scale(k),
             distance_weight=self.domain_distance_weight,
@@ -1008,9 +1214,9 @@ class VESPUQPlugin:
             rows = self._predict_rows(op_blk, radius[a:b].repeat(3))
             nb = pos_blk.shape[0]
             mean_parts.append(rows["mean"].reshape(3, nb))
-            std_parts.append(rows["std"].reshape(3, nb))
             epi_parts.append(rows["epistemic_variance"].reshape(3, nb))
             cov_blk = self._predict_covariance_block(pos_blk, operator=op_blk)
+            std_parts.append(cov_blk.std_components.transpose(0, 1))
             cov_parts.append(cov_blk.covariance)
             mean3_parts.append(cov_blk.mean_error)
         mean = torch.cat(mean_parts, dim=1).reshape(-1)
@@ -1063,12 +1269,12 @@ class VESPUQPlugin:
     def source_health(self) -> dict:
         """Step 3 source-health diagnostics on the fitted posterior mean (sigma)."""
 
-        self._require_fitted()
+        posterior = self._require_fitted()
         return source_diagnostics(
             source_positions=self.sources.positions,
             source_weights=self.sources.weights,
             shell_ids=self.sources.shell_ids,
-            sigma=self.posterior.mean,
+            sigma=posterior.mean,
         )
 
     # ------------------------------------------------------------------ persistence
@@ -1083,7 +1289,7 @@ class VESPUQPlugin:
         :meth:`load` for files.
         """
 
-        self._require_fitted()
+        posterior = self._require_fitted()
 
         def _cpu(t: torch.Tensor | None) -> torch.Tensor | None:
             return t.detach().cpu() if t is not None else None
@@ -1108,6 +1314,12 @@ class VESPUQPlugin:
                 "covariance_mode": self.covariance_mode,
                 "lowrank_rank": self.lowrank_rank,
                 "val_fraction": self.val_fraction,
+                "conformal_apply": self.conformal_apply,
+                "conformal_alpha": self.conformal_alpha,
+                "conformal_mode": self.conformal_mode,
+                "conformal_by_band": self.conformal_by_band,
+                "conformal_bands": dict(self.conformal_bands),
+                "conformal_min_band_n": self.conformal_min_band_n,
                 "low_altitude_radius": self.low_altitude_radius,
                 "risk_scoring": self.risk_scoring,
                 "sigma_threshold": self.sigma_threshold,
@@ -1123,10 +1335,10 @@ class VESPUQPlugin:
                 "dtype": "float64" if self.dtype == torch.float64 else "float32",
             },
             "posterior": {
-                "mean": _cpu(self.posterior.mean),
-                "cov": _cpu(self.posterior.cov),
-                "noise_var": float(self.posterior.noise_var),
-                "lambda_l2": self.posterior.lambda_l2,
+                "mean": _cpu(posterior.mean),
+                "cov": _cpu(posterior.cov),
+                "noise_var": float(posterior.noise_var),
+                "lambda_l2": posterior.lambda_l2,
             },
             "altitude_noise": (
                 {
@@ -1147,6 +1359,7 @@ class VESPUQPlugin:
                 "domain_angular_scale": self._domain_angular_scale,
             },
             "fit_info": dict(self.fit_info),
+            "conformal_calibration": json_safe(self.conformal_calibration),
             # JSON-safe passthrough block (decision policy / provenance from the training run).
             "user_metadata": json_safe(dict(self.user_metadata)),
         }
@@ -1189,10 +1402,16 @@ class VESPUQPlugin:
         def _dev(t: torch.Tensor | None) -> torch.Tensor | None:
             return t.to(device=plugin.device, dtype=dtype) if t is not None else None
 
+        def _required_tensor(t: torch.Tensor | None, name: str) -> torch.Tensor:
+            value = _dev(t)
+            if value is None:
+                raise ValueError(f"serialized plugin state is missing posterior {name}")
+            return value
+
         post = state["posterior"]
         plugin.posterior = LinearGaussianPosterior(
-            mean=_dev(post["mean"]),
-            cov=_dev(post["cov"]),
+            mean=_required_tensor(post["mean"], "mean"),
+            cov=_required_tensor(post["cov"], "cov"),
             noise_var=float(post["noise_var"]),
             lambda_l2=post["lambda_l2"],
         )
@@ -1213,6 +1432,7 @@ class VESPUQPlugin:
         plugin._domain_scale_k = domain.get("domain_scale_k")
         plugin._domain_angular_scale = domain.get("domain_angular_scale")
         plugin.fit_info = dict(state.get("fit_info", {}))
+        plugin.conformal_calibration = state.get("conformal_calibration")
         plugin.user_metadata = dict(state.get("user_metadata", {}))
         return plugin
 

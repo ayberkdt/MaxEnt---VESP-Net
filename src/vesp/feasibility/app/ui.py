@@ -41,7 +41,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
+PROJECT_ROOT = Path(__file__).resolve().parents[4]
 CONFIG_ROOT = PROJECT_ROOT / "configs"
 EXPERIMENTS_CONFIG_ROOT = CONFIG_ROOT / "experiments"
 DEFAULT_SINGLE_CONFIG = CONFIG_ROOT / "feasibility" / "discrete_single_shell.yaml"

@@ -9,6 +9,7 @@ import torch
 
 from vesp.uq.trajectory import (
     RiskScreeningReport,
+    _spearman,
     aggregate_trajectory_error,
     calibrate_risk_threshold,
     canonical_scoring_name,
@@ -93,10 +94,59 @@ def test_anticorrelated_risk_misses_high_error():
     assert report.spearman_risk_vs_error == pytest.approx(-1.0)
 
 
+def test_spearman_uses_average_ranks_for_ties_and_is_order_invariant():
+    risk = torch.tensor([1.0, 1.0, 2.0], dtype=torch.float64)
+    error = torch.tensor([1.0, 2.0, 3.0], dtype=torch.float64)
+    expected = math.sqrt(3.0) / 2.0
+
+    assert _spearman(risk, error) == pytest.approx(expected)
+    permutation = torch.tensor([2, 0, 1])
+    assert _spearman(risk[permutation], error[permutation]) == pytest.approx(expected)
+
+
 def test_true_error_length_mismatch_raises():
     risk = torch.arange(10, dtype=torch.float64)
     with pytest.raises(ValueError):
         select_reruns(risk, rerun_fraction=0.2, true_error=torch.arange(5, dtype=torch.float64))
+
+
+@pytest.mark.parametrize(
+    ("risk", "kwargs", "message"),
+    [
+        (torch.tensor([0.1, float("nan")]), {"threshold": 0.5}, "risk_scores"),
+        (torch.tensor([0.1, 0.2]), {"threshold": float("inf")}, "threshold"),
+        (
+            torch.tensor([0.1, 0.2]),
+            {"rerun_fraction": 0.5, "true_error": torch.tensor([1.0, float("inf")])},
+            "true_error",
+        ),
+    ],
+)
+def test_select_reruns_rejects_nonfinite_inputs(risk, kwargs, message):
+    with pytest.raises(ValueError, match=message):
+        select_reruns(risk, **kwargs)
+
+
+def test_select_reruns_rejects_invalid_true_error_quantile():
+    with pytest.raises(ValueError, match="true_error_quantile"):
+        select_reruns(
+            torch.tensor([0.1, 0.2]),
+            rerun_fraction=0.5,
+            true_error=torch.tensor([1.0, 2.0]),
+            true_error_quantile=1.1,
+        )
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is unavailable")
+def test_select_reruns_preserves_cuda_device_in_internal_masks():
+    report = select_reruns(
+        torch.tensor([0.1, 0.9, 0.2], device="cuda"),
+        rerun_fraction=1 / 3,
+        true_error=torch.tensor([1.0, 3.0, 2.0]),
+    )
+
+    assert report.flagged_indices == [1]
+    assert report.spearman_risk_vs_error == pytest.approx(1.0)
 
 
 def test_time_above_is_nan_without_threshold():

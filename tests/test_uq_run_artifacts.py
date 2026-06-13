@@ -30,6 +30,8 @@ def test_manifest_records_checksums_and_provenance(tmp_path):
     for name, info in manifest["artifacts"].items():
         assert info["sha256"] == compute_file_sha256(tmp_path / name)
         assert info["bytes"] == (tmp_path / name).stat().st_size
+        assert info["path"] == str(tmp_path / name)
+        assert info["origin"] == "generated"
 
 
 def test_provenance_injected_into_json(tmp_path):
@@ -45,6 +47,27 @@ def test_provenance_injected_into_json(tmp_path):
 def test_seed_inferred_from_config(tmp_path):
     manifest = write_run_artifacts(tmp_path, tool="t", config={"seed": 3}, json_files={"a.json": {}})
     assert manifest["seed"] == 3
+
+
+def test_manifest_records_preexisting_artifact_files(tmp_path):
+    figure = tmp_path / "figures" / "plot.png"
+    figure.parent.mkdir()
+    figure.write_bytes(b"fake-png")
+
+    manifest = write_run_artifacts(
+        tmp_path,
+        tool="t",
+        config={"seed": 3},
+        artifact_files={"figures/plot.png": figure, "figures/missing.pdf": tmp_path / "missing.pdf"},
+        artifact_statuses={"figures/plot.png": "ok", "figures/missing.pdf": "missing_data"},
+    )
+
+    assert manifest["artifacts"]["figures/plot.png"]["sha256"] == compute_file_sha256(figure)
+    assert manifest["artifacts"]["figures/plot.png"]["bytes"] == figure.stat().st_size
+    assert manifest["artifacts"]["figures/plot.png"]["origin"] == "prewritten"
+    assert manifest["artifacts"]["figures/plot.png"]["status"] == "ok"
+    assert manifest["artifacts"]["figures/missing.pdf"]["missing"] is True
+    assert manifest["artifacts"]["figures/missing.pdf"]["status"] == "missing_data"
 
 
 def test_existing_provenance_not_overwritten(tmp_path):

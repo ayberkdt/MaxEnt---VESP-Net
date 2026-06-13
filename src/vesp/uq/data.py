@@ -17,6 +17,7 @@ interface only.
 from __future__ import annotations
 
 import csv
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -98,7 +99,7 @@ def validate_uq_samples(samples: UQSamples) -> UQSamples:
     return samples
 
 
-def _resolve(fieldnames: set[str], aliases: dict[str, tuple[str, ...]]) -> dict[str, str] | None:
+def _resolve(fieldnames: set[str], aliases: Mapping[str, tuple[str, ...]]) -> dict[str, str] | None:
     """Return logical->actual column map if *all* logical names resolve, else ``None``."""
 
     selected: dict[str, str] = {}
@@ -162,9 +163,11 @@ def load_uq_samples_from_csv(
         for row in reader:
             pos_rows.append([float(row[pos_cols[c]]) for c in ("x", "y", "z")])
             if use_refsur:
+                assert ref_cols is not None and sur_cols is not None
                 ref_rows.append([float(row[ref_cols[c]]) for c in ("ax_ref", "ay_ref", "az_ref")])
                 sur_rows.append([float(row[sur_cols[c]]) for c in ("ax_sur", "ay_sur", "az_sur")])
             else:
+                assert err_cols is not None
                 err_rows.append([float(row[err_cols[c]]) for c in ("ax_err", "ay_err", "az_err")])
 
     if not pos_rows:

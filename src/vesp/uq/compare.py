@@ -27,22 +27,22 @@ def compare_models(
     :meth:`VESPUQPlugin.score_ensemble` consumes).
     """
 
-    plugin_a._require_fitted()
-    plugin_b._require_fitted()
+    posterior_a = plugin_a._require_fitted()
+    posterior_b = plugin_b._require_fitted()
 
     # Posterior distance
-    mean_a = plugin_a.posterior.mean
-    mean_b = plugin_b.posterior.mean
+    mean_a = posterior_a.mean
+    mean_b = posterior_b.mean
     mean_l2_diff = float(torch.linalg.norm(mean_a - mean_b))
 
-    cov_a = plugin_a.posterior.cov
-    cov_b = plugin_b.posterior.cov
+    cov_a = posterior_a.cov
+    cov_b = posterior_b.cov
     # Tr(Cov_a + Cov_b - 2(Cov_a Cov_b)^0.5) is Frechet distance, but a simple trace diff
     # or frobenius norm of difference is sufficient for a drift diagnostic summary.
     cov_frob_diff = float(torch.linalg.norm(cov_a - cov_b))
 
-    noise_var_a = plugin_a.posterior.noise_var
-    noise_var_b = plugin_b.posterior.noise_var
+    noise_var_a = posterior_a.noise_var
+    noise_var_b = posterior_b.noise_var
     noise_var_delta = float(noise_var_b - noise_var_a)
 
     # Domain support drift

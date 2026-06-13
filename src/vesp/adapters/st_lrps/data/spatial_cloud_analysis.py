@@ -30,8 +30,12 @@ import math
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
+
+if TYPE_CHECKING:
+    import h5py
 
 
 # ---------------------------------------------------------------------------

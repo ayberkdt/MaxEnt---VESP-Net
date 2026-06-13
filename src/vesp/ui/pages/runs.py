@@ -38,7 +38,7 @@ class RunsPage(QWidget):
             "SHA-256 checksummed, so results trace to exact bytes.",
         )
         self.count_chip = StatusChip("0 runs")
-        header.actions.addWidget(self.count_chip)
+        header.add_action(self.count_chip)
         header.add_action(make_button("Refresh", variant="ghost", on_click=self.refresh))
         root.addWidget(header)
 
@@ -49,11 +49,15 @@ class RunsPage(QWidget):
         table_card = Card("Run directories")
         self.table = QTableWidget(0, len(COLUMNS))
         self.table.setHorizontalHeaderLabels(COLUMNS)
-        self.table.verticalHeader().setVisible(False)
+        vertical_header = self.table.verticalHeader()
+        if vertical_header is not None:
+            vertical_header.setVisible(False)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.table.setAlternatingRowColors(True)
-        self.table.horizontalHeader().setStretchLastSection(True)
+        horizontal_header = self.table.horizontalHeader()
+        if horizontal_header is not None:
+            horizontal_header.setStretchLastSection(True)
         self.table.itemSelectionChanged.connect(self._on_select)
         self.table.doubleClicked.connect(lambda _i: self._open_selected())
         table_card.add(self.table)

@@ -58,6 +58,30 @@ def _radius_band(positions: torch.Tensor) -> torch.Tensor:
     return torch.linalg.norm(positions, dim=-1)
 
 
+def _masked_calibration_metrics(
+    mask: torch.Tensor,
+    mean: torch.Tensor,
+    std: torch.Tensor,
+    target: torch.Tensor,
+    epistemic_std: torch.Tensor,
+    row_radii: torch.Tensor,
+    homoscedastic: dict | None,
+) -> dict:
+    metrics = calibration_metrics(mean[mask], std[mask], target[mask])
+    metrics["mean_epistemic_std"] = float(torch.mean(epistemic_std[mask]).detach().cpu())
+    metrics["mean_radius"] = float(torch.mean(row_radii[mask]).detach().cpu())
+    if homoscedastic is not None:
+        baseline = calibration_metrics(
+            homoscedastic["mean"][mask],
+            homoscedastic["std"][mask],
+            target[mask],
+        )
+        metrics["homo_picp_90"] = baseline.get("picp_90")
+        metrics["homo_z_std"] = baseline.get("z_std")
+        metrics["homo_nll"] = baseline.get("nll")
+    return metrics
+
+
 def run_uncertainty_eval(config: dict) -> dict:
     config = merge_defaults(config)
     validate_config(config)
@@ -146,18 +170,15 @@ def run_uncertainty_eval(config: dict) -> dict:
         std = pred["std"]
         epistemic_std = torch.sqrt(pred["epistemic_variance"].clamp_min(0.0))
 
-        def _masked_metrics(mask: torch.Tensor) -> dict:
-            metrics = calibration_metrics(mean[mask], std[mask], tgt[mask])
-            metrics["mean_epistemic_std"] = float(torch.mean(epistemic_std[mask]).detach().cpu())
-            metrics["mean_radius"] = float(torch.mean(row_radii[mask]).detach().cpu())
-            if homo is not None:
-                hm = calibration_metrics(homo["mean"][mask], homo["std"][mask], tgt[mask])
-                metrics["homo_picp_90"] = hm.get("picp_90")
-                metrics["homo_z_std"] = hm.get("z_std")
-                metrics["homo_nll"] = hm.get("nll")
-            return metrics
-
-        report["bands"][name] = _masked_metrics(torch.ones_like(row_radii, dtype=torch.bool))
+        report["bands"][name] = _masked_calibration_metrics(
+            torch.ones_like(row_radii, dtype=torch.bool),
+            mean,
+            std,
+            tgt,
+            epistemic_std,
+            row_radii,
+            homo,
+        )
         # altitude sub-bands within this split (so a random-split run still shows per-altitude
         # calibration, which is the whole point of the heteroscedastic model)
         for band_name, band_range in altitude_bands.items():
@@ -166,7 +187,15 @@ def run_uncertainty_eval(config: dict) -> dict:
             lo, hi = float(band_range[0]), float(band_range[1])
             mask = (row_radii >= lo) & (row_radii <= hi)
             if int(mask.sum().detach().cpu()) >= 30:
-                report["bands"][f"{name}@{band_name}"] = _masked_metrics(mask)
+                report["bands"][f"{name}@{band_name}"] = _masked_calibration_metrics(
+                    mask,
+                    mean,
+                    std,
+                    tgt,
+                    epistemic_std,
+                    row_radii,
+                    homo,
+                )
 
     report["summary"] = _summary(report)
     return report

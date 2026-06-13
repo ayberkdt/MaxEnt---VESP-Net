@@ -7,7 +7,7 @@ config under the run's output directory, so the executed command stays a plain, 
 
 from __future__ import annotations
 
-import json
+import copy
 import tempfile
 from pathlib import Path
 
@@ -27,9 +27,19 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from vesp.ui.jobs import ProcessJob, open_file, open_in_file_manager
+from vesp.ui.helpers import fmt, safe_read_json
+from vesp.ui.jobs import ProcessJob
 from vesp.ui.paths import OUTPUTS_DIR, list_configs
-from vesp.ui.widgets import Card, KpiTile, LogConsole, PageHeader, PathPicker, StatusChip, make_button
+from vesp.ui.widgets import (
+    Card,
+    KpiTile,
+    LogConsole,
+    PageHeader,
+    PathPicker,
+    RunOutputActions,
+    StatusChip,
+    make_button,
+)
 
 CONFIG_DEFAULT = "(config default)"
 SCORING_MODES = (
@@ -64,7 +74,7 @@ class TrainPage(QWidget):
             "demo ensemble, and package the model with its decision policy + model card.",
         )
         self.status = StatusChip("idle")
-        header.actions.addWidget(self.status)
+        header.add_action(self.status)
         root.addWidget(header)
 
         split = QSplitter()
@@ -121,6 +131,10 @@ class TrainPage(QWidget):
         self.domain.addItems(TRISTATE)
         form.addRow("Domain support", self.domain)
 
+        self.conformal = QComboBox()
+        self.conformal.addItems(TRISTATE)
+        form.addRow("Conformal prediction", self.conformal)
+
         self.save_model = QCheckBox("Package the fitted model (vespuq_plugin.pt + model card)")
         self.save_model.setChecked(True)
         form_card.add_layout(form)
@@ -146,27 +160,28 @@ class TrainPage(QWidget):
         self.kpi_picp = KpiTile("low-band PICP90")
         self.kpi_ratio = KpiTile("low/high epistemic")
         self.kpi_flagged = KpiTile("flagged")
+        self.kpi_conformal = KpiTile("conformal")
         self.kpi_speed = KpiTile("scoring")
-        for tile in (self.kpi_picp, self.kpi_ratio, self.kpi_flagged, self.kpi_speed):
+        for tile in (self.kpi_picp, self.kpi_ratio, self.kpi_flagged, self.kpi_conformal, self.kpi_speed):
             tiles.addWidget(tile)
         results.add_layout(tiles)
 
         self.cal_table = QTableWidget(0, len(CAL_BAND_COLUMNS))
         self.cal_table.setHorizontalHeaderLabels(CAL_BAND_COLUMNS)
-        self.cal_table.verticalHeader().setVisible(False)
+        vertical_header = self.cal_table.verticalHeader()
+        if vertical_header is not None:
+            vertical_header.setVisible(False)
         self.cal_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self.cal_table.horizontalHeader().setStretchLastSection(True)
+        horizontal_header = self.cal_table.horizontalHeader()
+        if horizontal_header is not None:
+            horizontal_header.setStretchLastSection(True)
         self.cal_table.setMaximumHeight(170)
         results.add(self.cal_table)
 
-        buttons = QHBoxLayout()
-        self.open_dir = make_button("Open run folder", variant="ghost", on_click=self._open_dir)
-        self.open_report = make_button("Open report", variant="ghost", on_click=self._open_report)
-        for b in (self.open_dir, self.open_report):
-            b.setEnabled(False)
-            buttons.addWidget(b)
-        buttons.addStretch(1)
-        results.add_layout(buttons)
+        self.output_actions = RunOutputActions(report_name="vespuq_report.md")
+        self.open_dir = self.output_actions.open_dir
+        self.open_report = self.output_actions.open_report
+        results.add(self.output_actions)
         left_col.addWidget(results)
         left_col.addStretch(1)
 
@@ -204,21 +219,17 @@ class TrainPage(QWidget):
         import yaml
 
         config = yaml.safe_load(base.read_text(encoding="utf-8")) or {}
-        if self.run_name.text().strip():
-            config.setdefault("output", {})["run_name"] = self.run_name.text().strip()
-        if self.seed.value() >= 0:
-            config["seed"] = int(self.seed.value())
-        uq = config.setdefault("uq", {})
-        if self.scoring.currentText() != CONFIG_DEFAULT:
-            uq.setdefault("risk", {})["scoring"] = self.scoring.currentText()
-        if self.covariance.currentText() != CONFIG_DEFAULT:
-            uq["covariance_mode"] = self.covariance.currentText()
-        if self.noise.currentText() != CONFIG_DEFAULT:
-            uq["noise_model"] = self.noise.currentText()
-        if self.domain.currentText() != CONFIG_DEFAULT:
-            uq.setdefault("risk", {})["domain_support"] = self.domain.currentText() == "on"
-        config.setdefault("output", {})["save_model"] = bool(self.save_model.isChecked())
-        return config
+        return apply_training_overrides(
+            config,
+            run_name=self.run_name.text().strip(),
+            seed=int(self.seed.value()),
+            scoring=self.scoring.currentText(),
+            covariance=self.covariance.currentText(),
+            noise=self.noise.currentText(),
+            domain=self.domain.currentText(),
+            conformal=self.conformal.currentText(),
+            save_model=bool(self.save_model.isChecked()),
+        )
 
     def _run(self) -> None:
         base = self._selected_config()
@@ -237,6 +248,7 @@ class TrainPage(QWidget):
         output_dir = Path(config.get("output", {}).get("output_dir", str(OUTPUTS_DIR)))
         run_name = str(config.get("output", {}).get("run_name", "vespuq"))
         self._run_dir = output_dir / run_name
+        self.output_actions.set_output(self._run_dir)
 
         fd, tmp_name = tempfile.mkstemp(prefix=f"ui_{base.stem}_", suffix=".yaml")
         tmp = Path(tmp_name)
@@ -249,8 +261,7 @@ class TrainPage(QWidget):
         self.run_button.setEnabled(False)
         self.cancel_button.setEnabled(True)
         self.progress.setRange(0, 0)
-        for b in (self.open_dir, self.open_report):
-            b.setEnabled(False)
+        self.output_actions.set_actions_enabled(False)
         self.job.start_module("vesp.uq.run", ["--config", str(tmp)])
 
     # ------------------------------------------------------------------ job events
@@ -275,10 +286,9 @@ class TrainPage(QWidget):
         if not report_path.is_file():
             self.console.append_line(f"[ui] report not found: {report_path}")
             return
-        try:
-            report = json.loads(report_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as exc:
-            self.console.append_line(f"[ui] failed to parse report: {exc}")
+        report, error = safe_read_json(report_path)
+        if report is None:
+            self.console.append_line(f"[ui] failed to parse report: {error}")
             return
 
         cal = report.get("experiment_1_calibration", {})
@@ -287,17 +297,23 @@ class TrainPage(QWidget):
         runtime = report.get("runtime", {})
 
         low = cal.get("low", {})
-        self.kpi_picp.set(_fmt(low.get("picp_90")), "target 0.90 in the low band")
+        self.kpi_picp.set(fmt(low.get("picp_90"), digits=3), "target 0.90 in the low band")
         self.kpi_ratio.set(
-            _fmt(cal.get("low_high_epistemic_std_ratio")), "should be > 1: uncertainty grows when low"
+            fmt(cal.get("low_high_epistemic_std_ratio"), digits=3), "should be > 1: uncertainty grows when low"
         )
         self.kpi_flagged.set(
             f"{screen.get('n_flagged', '--')}/{screen.get('n_trajectories', '--')}",
-            f"capture rate {_fmt(summary.get('capture_rate'))}",
+            f"capture rate {fmt(summary.get('capture_rate'), digits=3)}",
+        )
+        conformal = report.get("conformal_calibration") or {}
+        global_cal = conformal.get("global") or {}
+        self.kpi_conformal.set(
+            fmt(global_cal.get("scale"), digits=3) if conformal.get("enabled") else "off",
+            str(conformal.get("scope", "")) if conformal.get("enabled") else "config default",
         )
         self.kpi_speed.set(
-            f"{_fmt(runtime.get('score_us_per_output_point'))} us/pt",
-            f"fit {_fmt(runtime.get('fit_seconds'))} s",
+            f"{fmt(runtime.get('score_us_per_output_point'), digits=3)} us/pt",
+            f"fit {fmt(runtime.get('fit_seconds'), digits=3)} s",
         )
 
         self.cal_table.setRowCount(0)
@@ -310,28 +326,49 @@ class TrainPage(QWidget):
             values = (
                 band,
                 str(metrics.get("n", "")),
-                _fmt(metrics.get("z_std")),
-                _fmt(metrics.get("picp_90")),
-                _fmt(metrics.get("ellipsoid_picp_90")),
-                _fmt(metrics.get("nll")),
+                fmt(metrics.get("z_std"), digits=3),
+                fmt(metrics.get("picp_90"), digits=3),
+                fmt(metrics.get("ellipsoid_picp_90"), digits=3),
+                fmt(metrics.get("nll"), digits=3),
             )
             for col, text in enumerate(values):
                 self.cal_table.setItem(row, col, QTableWidgetItem(text))
         self.cal_table.resizeColumnsToContents()
-        for b in (self.open_dir, self.open_report):
-            b.setEnabled(True)
-
-    def _open_dir(self) -> None:
-        if self._run_dir is not None and self._run_dir.exists():
-            open_in_file_manager(self._run_dir)
-
-    def _open_report(self) -> None:
-        if self._run_dir is not None and (self._run_dir / "vespuq_report.md").is_file():
-            open_file(self._run_dir / "vespuq_report.md")
+        self.output_actions.set_actions_enabled(True)
 
 
-def _fmt(value, digits: int = 3) -> str:
-    try:
-        return f"{float(value):.{digits}g}"
-    except (TypeError, ValueError):
-        return "--"
+def apply_training_overrides(
+    config: dict,
+    *,
+    run_name: str = "",
+    seed: int = -1,
+    scoring: str = CONFIG_DEFAULT,
+    covariance: str = CONFIG_DEFAULT,
+    noise: str = CONFIG_DEFAULT,
+    domain: str = CONFIG_DEFAULT,
+    conformal: str = CONFIG_DEFAULT,
+    save_model: bool = True,
+) -> dict:
+    """Return a config copy with UI overrides applied.
+
+    Keeping this pure makes the Train page easier to test without constructing Qt widgets.
+    """
+
+    out = copy.deepcopy(config)
+    if run_name:
+        out.setdefault("output", {})["run_name"] = run_name
+    if seed >= 0:
+        out["seed"] = int(seed)
+    uq = out.setdefault("uq", {})
+    if scoring != CONFIG_DEFAULT:
+        uq.setdefault("risk", {})["scoring"] = scoring
+    if covariance != CONFIG_DEFAULT:
+        uq["covariance_mode"] = covariance
+    if noise != CONFIG_DEFAULT:
+        uq["noise_model"] = noise
+    if domain != CONFIG_DEFAULT:
+        uq.setdefault("risk", {})["domain_support"] = domain == "on"
+    if conformal != CONFIG_DEFAULT:
+        uq.setdefault("conformal", {})["apply"] = conformal == "on"
+    out.setdefault("output", {})["save_model"] = bool(save_model)
+    return out

@@ -64,8 +64,10 @@ def _expand_spec(spec, base: dict) -> list[dict]:
         keys = list(grid.keys())
         value_lists = [grid[k] if isinstance(grid[k], list) else [grid[k]] for k in keys]
         for combo in product(*value_lists):
-            overrides = {k: v for k, v in zip(keys, combo)}
-            leaf_name = "__".join(f"{k.split('.')[-1]}_{_fmt_value(v)}" for k, v in zip(keys, combo))
+            overrides = {k: v for k, v in zip(keys, combo, strict=True)}
+            leaf_name = "__".join(
+                f"{k.split('.')[-1]}_{_fmt_value(v)}" for k, v in zip(keys, combo, strict=True)
+            )
             trials.append(_apply_overrides(base, overrides, default_name=leaf_name))
         return trials
     if isinstance(spec, list):

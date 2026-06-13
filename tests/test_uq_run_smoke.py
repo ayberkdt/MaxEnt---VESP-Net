@@ -76,3 +76,23 @@ def test_run_save_model_persists_loadable_plugin(tmp_path):
     pred = loaded.predict_uncertainty([[0.0, 0.0, 1.2], [0.0, 1.4, 0.0]])
     assert pred.sigma.shape == (2,)
     assert bool((pred.sigma > 0).all())
+
+
+def test_run_save_model_records_operational_conformal_metadata(tmp_path):
+    from vesp.uq import VESPUQPlugin
+
+    cfg = load_config(ROOT / "configs" / "vespuq" / "vespuq_smoke.yaml")
+    cfg["uq"]["conformal"]["apply"] = True
+    cfg["output"]["output_dir"] = str(tmp_path)
+    cfg["output"]["run_name"] = "smoke_conformal"
+    cfg["output"]["save_model"] = True
+    run(cfg)
+
+    model_path = tmp_path / "smoke_conformal" / "vespuq_plugin.pt"
+    loaded = VESPUQPlugin.load(model_path)
+    conformal = loaded.user_metadata.get("conformal_prediction", {})
+    assert conformal.get("enabled") is True
+    assert conformal.get("global", {}).get("scale") is not None
+
+    card = (tmp_path / "smoke_conformal" / "vespuq_plugin_card.md").read_text(encoding="utf-8")
+    assert "operational conformal prediction scale" in card

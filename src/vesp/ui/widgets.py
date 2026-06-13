@@ -7,6 +7,7 @@ from pathlib import Path
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
+    QComboBox,
     QFileDialog,
     QFrame,
     QGridLayout,
@@ -19,6 +20,8 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+
+from vesp.ui.jobs import open_file, open_in_file_manager
 
 
 class Card(QFrame):
@@ -103,13 +106,13 @@ class PageHeader(QWidget):
         text.addWidget(t)
         text.addWidget(s)
         row.addLayout(text, 1)
-        self.actions = QHBoxLayout()
-        self.actions.setSpacing(8)
-        row.addLayout(self.actions)
+        self.action_layout = QHBoxLayout()
+        self.action_layout.setSpacing(8)
+        row.addLayout(self.action_layout)
 
-    def add_action(self, button: QPushButton) -> QPushButton:
-        self.actions.addWidget(button)
-        return button
+    def add_action(self, widget: QWidget) -> QWidget:
+        self.action_layout.addWidget(widget)
+        return widget
 
 
 class PathPicker(QWidget):
@@ -156,6 +159,99 @@ class PathPicker(QWidget):
         self.edit.setText(str(path))
 
 
+class ModelArtifactPicker(QWidget):
+    """Saved-model combo with a custom-path fallback."""
+
+    def __init__(
+        self,
+        placeholder: str = "custom vespuq_plugin.pt",
+        *,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(6)
+        self.combo = QComboBox()
+        self.custom_picker = PathPicker(placeholder, name_filter="VESP-UQ model (*.pt)")
+        self.combo.currentIndexChanged.connect(self._sync_custom_visibility)
+        layout.addWidget(self.combo)
+        layout.addWidget(self.custom_picker)
+
+    def refresh(self, models: list[Path], *, default_index: int = 0) -> None:
+        """Refresh discovered artifacts while preserving the current selection."""
+
+        current = self.combo.currentData()
+        self.combo.blockSignals(True)
+        self.combo.clear()
+        for path in models:
+            self.combo.addItem(f"{path.parent.name}/{path.name}", str(path))
+        self.combo.addItem("Browse...", "")
+        if current:
+            index = self.combo.findData(current)
+            if index >= 0:
+                self.combo.setCurrentIndex(index)
+        elif 0 <= default_index < len(models):
+            self.combo.setCurrentIndex(default_index)
+        self.combo.blockSignals(False)
+        self._sync_custom_visibility()
+
+    def selected_path(self) -> Path | None:
+        data = self.combo.currentData()
+        return Path(data) if data else self.custom_picker.path()
+
+    def _sync_custom_visibility(self, _index: int | None = None) -> None:
+        self.custom_picker.setVisible(self.combo.currentData() == "")
+
+
+class RunOutputActions(QWidget):
+    """Open-folder/open-report actions with one shared output target."""
+
+    def __init__(
+        self,
+        *,
+        report_name: str | None = None,
+        folder_label: str = "Open run folder",
+        report_label: str = "Open report",
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self._directory: Path | None = None
+        self._report_name = report_name
+        row = QHBoxLayout(self)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(8)
+        self.open_dir = make_button(folder_label, variant="ghost", on_click=self._open_dir)
+        row.addWidget(self.open_dir)
+        self.open_report: QPushButton | None = None
+        if report_name is not None:
+            self.open_report = make_button(report_label, variant="ghost", on_click=self._open_report)
+            row.addWidget(self.open_report)
+        row.addStretch(1)
+        self.set_actions_enabled(False)
+
+    def set_output(self, directory: Path | None, *, report_name: str | None = None) -> None:
+        self._directory = directory
+        if report_name is not None:
+            self._report_name = report_name
+
+    def set_actions_enabled(self, enabled: bool) -> None:
+        self.open_dir.setEnabled(enabled)
+        if self.open_report is not None:
+            self.open_report.setEnabled(enabled)
+
+    def _open_dir(self) -> None:
+        if self._directory is not None and self._directory.exists():
+            open_in_file_manager(self._directory)
+
+    def _open_report(self) -> None:
+        if self._directory is None or self._report_name is None:
+            return
+        report_path = self._directory / self._report_name
+        if report_path.is_file():
+            open_file(report_path)
+
+
 class LogConsole(QPlainTextEdit):
     """Read-only streaming log with a bounded scrollback."""
 
@@ -186,6 +282,8 @@ class InfoGrid(QWidget):
     def clear(self) -> None:
         while self._grid.count():
             item = self._grid.takeAt(0)
+            if item is None:
+                continue
             w = item.widget()
             if w is not None:
                 w.deleteLater()

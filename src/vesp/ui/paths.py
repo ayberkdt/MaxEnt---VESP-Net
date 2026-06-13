@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass, field
 from pathlib import Path
+
+from vesp.ui.helpers import safe_read_json
 
 
 def repo_root() -> Path:
@@ -40,8 +41,18 @@ def list_models(root: Path | None = None) -> list[Path]:
     base = root or OUTPUTS_DIR
     if not base.is_dir():
         return []
-    found = list(base.rglob("vespuq_plugin.pt"))
-    return sorted(found, key=lambda p: p.stat().st_mtime, reverse=True)
+    found: list[tuple[float, Path]] = []
+    try:
+        candidates = base.rglob("vespuq_plugin.pt")
+        for path in candidates:
+            try:
+                if path.is_file():
+                    found.append((path.stat().st_mtime, path))
+            except OSError:
+                continue
+    except OSError:
+        return []
+    return [path for _mtime, path in sorted(found, key=lambda item: item[0], reverse=True)]
 
 
 @dataclass
@@ -74,11 +85,15 @@ def scan_runs(root: Path | None = None) -> list[RunRecord]:
         return []
     records: list[RunRecord] = []
     for manifest_path in base.rglob("run_manifest.json"):
-        try:
-            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
+        manifest, error = safe_read_json(manifest_path)
+        if error is not None or manifest is None:
             continue
-        artifacts = manifest.get("artifacts", {}) or {}
+        artifacts_raw = manifest.get("artifacts", {})
+        metrics_raw = manifest.get("metrics", {})
+        inputs_raw = manifest.get("inputs", {})
+        artifacts = artifacts_raw if isinstance(artifacts_raw, dict) else {}
+        metrics = metrics_raw if isinstance(metrics_raw, dict) else {}
+        inputs = inputs_raw if isinstance(inputs_raw, dict) else {}
         if "screening_report_json" in artifacts:
             kind = "serve"
         elif "vespuq_report_json" in artifacts:
@@ -91,9 +106,9 @@ def scan_runs(root: Path | None = None) -> list[RunRecord]:
                 manifest_path=manifest_path,
                 created_at=str(manifest.get("created_at_utc", "")),
                 kind=kind,
-                metrics=manifest.get("metrics", {}) or {},
+                metrics=metrics,
                 artifacts=artifacts,
-                inputs=manifest.get("inputs", {}) or {},
+                inputs=inputs,
             )
         )
     records.sort(key=lambda r: r.created_at, reverse=True)

@@ -25,6 +25,30 @@ jobs:
         # feasibility tree stays out by the original N2 churn decision.
         run: ruff check src/vesp/uq src/vesp/common src/vesp/ui ui scripts tests
 
+      - name: Source parse / UTF-8 hygiene
+        # H1: parse without bytecode writes, so Windows/local __pycache__ permissions do not matter.
+        run: python scripts/check_source_parse.py src scripts tests ui
+
+  typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install full runtime + typecheck dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      - name: Mypy (scoped VESP-UQ + common + UI surfaces)
+        # H5: use the real runtime dependency graph so torch/PyQt6 interfaces are checked
+        # instead of disappearing behind ignore_missing_imports.
+        run: mypy src/vesp/uq src/vesp/common src/vesp/ui
+
   test:
     runs-on: ubuntu-latest
     steps:
@@ -38,10 +62,10 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          # Editable install without deps, then CPU-only runtime deps. PyQt6 is intentionally
-          # omitted -- the UI test importorskips it, so it is skipped rather than failing CI.
+          # Editable install without deps, then CPU-only runtime deps. PyQt6 is included so the
+          # offscreen Mission Console Compare smoke runs in CI.
           pip install -e . --no-deps
-          pip install numpy scipy pandas matplotlib pyyaml pytest hypothesis
+          pip install numpy scipy pandas matplotlib pyyaml pytest hypothesis PyQt6
           pip install torch --index-url https://download.pytorch.org/whl/cpu
 
       - name: Run test suite
@@ -65,6 +89,12 @@ jobs:
           test -f outputs/iac_pack/calibration_report.md
           test -f outputs/iac_pack/linear_propagation.md
           test -f outputs/iac_pack/force_correction_benchmark.md
+          test -f outputs/iac_pack/figures/reliability_diagram.png
+          test -f outputs/iac_pack/figures/reliability_diagram.pdf
+          test -f outputs/iac_pack/figures/sigma_vs_altitude.png
+          test -f outputs/iac_pack/figures/risk_vs_true_error.png
+          test -f outputs/iac_pack/figures/mc_vs_stm_agreement.png
+          test -f outputs/iac_pack/figures/l60_l90_band_comparison.png
 
   package:
     runs-on: ubuntu-latest

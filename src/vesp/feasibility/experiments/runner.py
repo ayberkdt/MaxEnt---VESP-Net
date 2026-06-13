@@ -43,7 +43,7 @@ from vesp.common.config import merge_defaults
 from vesp.core.models import MultiShellDiscreteVESP
 from vesp.feasibility.training.train_discrete import run
 
-_REPO_ROOT = Path(__file__).resolve().parents[3]
+_REPO_ROOT = Path(__file__).resolve().parents[4]
 
 
 @dataclass(frozen=True)
@@ -175,7 +175,7 @@ def expand_trials(experiment_cfg: dict, *, quick: bool = False, quick_per_axis: 
     for combo in product(*value_lists):
         cfg = deepcopy(base)
         label_parts: list[str] = []
-        for axis, value in zip(axes, combo):
+        for axis, value in zip(axes, combo, strict=True):
             for dotted in axis["paths"]:
                 _set_nested(cfg, dotted, value)
             leaf = axis["paths"][0].split(".")[-1]

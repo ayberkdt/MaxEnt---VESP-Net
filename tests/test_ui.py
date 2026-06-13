@@ -14,6 +14,8 @@ from PyQt6.QtWidgets import QApplication
 
 from vesp.feasibility.app import ui
 
+ROOT = Path(__file__).resolve().parents[1]
+
 
 @pytest.fixture(scope="module")
 def qapp():
@@ -68,6 +70,11 @@ def _write_checkpoint(path: Path, *, run_name: str = "ui_run", normalize_targets
         path,
     )
     return path
+
+
+def test_ui_resolves_repository_paths():
+    assert ui.PROJECT_ROOT == ROOT
+    assert ui.DEFAULT_SINGLE_CONFIG.is_file()
 
 
 def test_ui_builds_with_root_config_presets(qapp, monkeypatch, tmp_path):

@@ -5,6 +5,7 @@ from __future__ import annotations
 import dataclasses
 import hashlib
 import json
+import math
 import os
 import platform
 import sys
@@ -13,7 +14,7 @@ from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import torch
 
@@ -66,26 +67,44 @@ def json_safe(value: Any) -> Any:
     if isinstance(value, Path):
         return str(value)
     if dataclasses.is_dataclass(value):
-        return {str(k): json_safe(v) for k, v in asdict(value).items()}
+        return {str(k): json_safe(v) for k, v in asdict(cast(Any, value)).items()}
     if isinstance(value, Mapping):
         return {str(k): json_safe(v) for k, v in value.items()}
-    if isinstance(value, (list, tuple, set)):
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
+    if isinstance(value, (set, frozenset)):
+        items = [json_safe(v) for v in value]
+        return sorted(
+            items,
+            key=lambda item: json.dumps(item, sort_keys=True, ensure_ascii=True, default=str),
+        )
+    if isinstance(value, (list, tuple)):
         return [json_safe(v) for v in value]
     if hasattr(value, "detach") and callable(value.detach):
         try:
-            return value.detach().cpu().tolist()
+            return json_safe(value.detach().cpu().tolist())
         except Exception:
             return str(value)
     if hasattr(value, "item") and callable(value.item):
         try:
-            return value.item()
+            return json_safe(value.item())
         except Exception:
             return str(value)
     return value
 
 
 def canonical_json_text(payload: Mapping[str, Any], *, indent: int = 2) -> str:
-    return json.dumps(json_safe(dict(payload)), indent=indent, sort_keys=True, ensure_ascii=True, default=str) + "\n"
+    return (
+        json.dumps(
+            json_safe(dict(payload)),
+            indent=indent,
+            sort_keys=True,
+            ensure_ascii=True,
+            allow_nan=False,
+            default=str,
+        )
+        + "\n"
+    )
 
 
 def atomic_write_text(path: str | Path, text: str) -> None:
@@ -138,21 +157,88 @@ def compute_file_sha256(path: str | Path) -> str:
     return digest.hexdigest()
 
 
-def _checksum_payload(files: Mapping[str, str | Path] | None) -> dict[str, dict[str, Any]]:
-    """Per-file provenance entries: path + SHA-256 + byte size (or ``missing: true``)."""
+def file_manifest_entries(
+    files: Mapping[str, str | Path] | None,
+    *,
+    origin: str,
+    statuses: Mapping[str, Any] | None = None,
+    metadata: Mapping[str, Mapping[str, Any]] | None = None,
+) -> dict[str, dict[str, Any]]:
+    """Build consistent manifest entries for produced, prewritten, or consumed files.
+
+    Every entry records ``path`` and ``origin``. Existing files also record SHA-256 and byte size;
+    missing files record ``missing: true``. Callers may add a machine-readable ``status`` and
+    per-file metadata without changing the common checksum contract.
+    """
 
     payload: dict[str, dict[str, Any]] = {}
     for name, file_path in (files or {}).items():
         p = Path(file_path)
+        file_metadata = dict(metadata.get(name, {})) if metadata is not None else {}
+        entry_origin = str(file_metadata.pop("origin", origin))
+        entry: dict[str, Any] = {"path": str(p), "origin": entry_origin}
         if p.exists() and p.is_file():
-            payload[str(name)] = {
-                "path": str(p),
-                "sha256": compute_file_sha256(p),
-                "bytes": p.stat().st_size,
-            }
+            entry.update({"sha256": compute_file_sha256(p), "bytes": p.stat().st_size})
         else:
-            payload[str(name)] = {"path": str(p), "missing": True}
+            entry["missing"] = True
+        if statuses is not None and name in statuses:
+            entry["status"] = json_safe(statuses[name])
+        for key, value in file_metadata.items():
+            if key not in entry:
+                entry[str(key)] = json_safe(value)
+        payload[str(name)] = entry
     return payload
+
+
+def build_run_manifest(
+    *,
+    config: Mapping[str, Any] | None = None,
+    metrics: Mapping[str, Any] | None = None,
+    artifacts: Mapping[str, str | Path] | None = None,
+    inputs: Mapping[str, str | Path] | None = None,
+    artifact_statuses: Mapping[str, Any] | None = None,
+    input_statuses: Mapping[str, Any] | None = None,
+    artifact_metadata: Mapping[str, Mapping[str, Any]] | None = None,
+    input_metadata: Mapping[str, Mapping[str, Any]] | None = None,
+    manifest_metadata: Mapping[str, Any] | None = None,
+    created_at_utc: str | None = None,
+) -> dict[str, Any]:
+    """Build the shared VESP run-manifest schema without writing it."""
+
+    manifest: dict[str, Any] = {
+        "schema_version": RUN_MANIFEST_SCHEMA_VERSION,
+        "created_at_utc": created_at_utc or utc_now_iso(),
+        "python": sys.version.split()[0],
+        "platform": platform.platform(),
+        "config": json_safe(dict(config or {})),
+        "metrics": json_safe(dict(metrics or {})),
+        "artifacts": file_manifest_entries(
+            artifacts,
+            origin="generated",
+            statuses=artifact_statuses,
+            metadata=artifact_metadata,
+        ),
+        "inputs": file_manifest_entries(
+            inputs,
+            origin="consumed",
+            statuses=input_statuses,
+            metadata=input_metadata,
+        ),
+    }
+    reserved = set(manifest)
+    for key, value in (manifest_metadata or {}).items():
+        if key in reserved:
+            raise ValueError(f"manifest_metadata cannot replace reserved field {key!r}")
+        manifest[str(key)] = json_safe(value)
+    return manifest
+
+
+def write_manifest(path: str | Path, **kwargs: Any) -> dict[str, Any]:
+    """Build and atomically write a manifest to an explicit path."""
+
+    manifest = build_run_manifest(**kwargs)
+    atomic_write_json(path, manifest)
+    return manifest
 
 
 def write_run_manifest(
@@ -162,6 +248,11 @@ def write_run_manifest(
     metrics: Mapping[str, Any] | None = None,
     artifacts: Mapping[str, str | Path] | None = None,
     inputs: Mapping[str, str | Path] | None = None,
+    artifact_statuses: Mapping[str, Any] | None = None,
+    input_statuses: Mapping[str, Any] | None = None,
+    artifact_metadata: Mapping[str, Mapping[str, Any]] | None = None,
+    input_metadata: Mapping[str, Mapping[str, Any]] | None = None,
+    manifest_metadata: Mapping[str, Any] | None = None,
 ) -> Path:
     """Write a compact provenance manifest for a completed run.
 
@@ -172,17 +263,18 @@ def write_run_manifest(
     """
 
     layout = ensure_run_layout(run_dir)
-    manifest = {
-        "schema_version": RUN_MANIFEST_SCHEMA_VERSION,
-        "created_at_utc": utc_now_iso(),
-        "python": sys.version.split()[0],
-        "platform": platform.platform(),
-        "config": dict(config or {}),
-        "metrics": dict(metrics or {}),
-        "artifacts": _checksum_payload(artifacts),
-        "inputs": _checksum_payload(inputs),
-    }
-    atomic_write_json(layout.run_manifest_json, manifest)
+    write_manifest(
+        layout.run_manifest_json,
+        config=config,
+        metrics=metrics,
+        artifacts=artifacts,
+        inputs=inputs,
+        artifact_statuses=artifact_statuses,
+        input_statuses=input_statuses,
+        artifact_metadata=artifact_metadata,
+        input_metadata=input_metadata,
+        manifest_metadata=manifest_metadata,
+    )
     return layout.run_manifest_json
 
 
@@ -192,10 +284,13 @@ __all__ = [
     "atomic_torch_save",
     "atomic_write_json",
     "atomic_write_text",
+    "build_run_manifest",
     "compute_file_sha256",
     "ensure_run_layout",
+    "file_manifest_entries",
     "json_safe",
     "make_run_layout",
     "utc_now_iso",
+    "write_manifest",
     "write_run_manifest",
 ]

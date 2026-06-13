@@ -7,10 +7,10 @@ on the GUI thread from precomputed arrays.
 
 from __future__ import annotations
 
+from functools import partial
 from pathlib import Path
 
 from PyQt6.QtWidgets import (
-    QComboBox,
     QHBoxLayout,
     QSplitter,
     QTabWidget,
@@ -19,10 +19,11 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from vesp.ui.helpers import fmt
 from vesp.ui.jobs import FnWorker, open_in_file_manager
 from vesp.ui.paths import list_models
 from vesp.ui.theme import TOKENS
-from vesp.ui.widgets import Card, InfoGrid, PageHeader, PathPicker, StatusChip, make_button
+from vesp.ui.widgets import Card, InfoGrid, ModelArtifactPicker, PageHeader, StatusChip, make_button
 
 
 def _probe_model(path: Path) -> dict:
@@ -49,6 +50,7 @@ def _probe_model(path: Path) -> dict:
         "path": str(path),
         "fit_info": dict(plugin.fit_info),
         "metadata": meta,
+        "conformal_calibration": meta.get("conformal_prediction") or plugin.conformal_calibration,
         "card_markdown": card_path.read_text(encoding="utf-8") if card_path.is_file() else None,
         "profile": {
             "radius": radii.tolist(),
@@ -76,19 +78,15 @@ class ModelPage(QWidget):
             "the model card, and the calibrated uncertainty profile.",
         )
         self.status = StatusChip("idle")
-        header.actions.addWidget(self.status)
+        header.add_action(self.status)
         root.addWidget(header)
 
         picker_card = Card("Artifact")
         row = QHBoxLayout()
-        self.model_combo = QComboBox()
-        self.model_picker = PathPicker("custom vespuq_plugin.pt", name_filter="VESP-UQ model (*.pt)")
-        self.model_picker.setVisible(False)
-        self.model_combo.currentIndexChanged.connect(
-            lambda _i: self.model_picker.setVisible(self.model_combo.currentData() == "")
-        )
-        row.addWidget(self.model_combo, 1)
-        row.addWidget(self.model_picker, 1)
+        self.model_selector = ModelArtifactPicker()
+        self.model_combo = self.model_selector.combo
+        self.model_picker = self.model_selector.custom_picker
+        row.addWidget(self.model_selector, 1)
         row.addWidget(make_button("Inspect", variant="primary", on_click=self._inspect))
         self.open_folder = make_button("Open folder", variant="ghost", on_click=self._open_folder)
         self.open_folder.setEnabled(False)
@@ -124,7 +122,7 @@ class ModelPage(QWidget):
         self.plot_host = QWidget()
         self.plot_layout = QVBoxLayout(self.plot_host)
         self.plot_layout.setContentsMargins(8, 8, 8, 8)
-        self._canvas = None
+        self._canvas: QWidget | None = None
         self.tabs.addTab(self.plot_host, "Uncertainty profile")
         self.card_view = QTextBrowser()
         self.card_view.setOpenExternalLinks(True)
@@ -137,28 +135,14 @@ class ModelPage(QWidget):
 
     # ------------------------------------------------------------------ data
     def refresh_models(self) -> None:
-        current = self.model_combo.currentData()
-        self.model_combo.blockSignals(True)
-        self.model_combo.clear()
-        for path in list_models():
-            self.model_combo.addItem(f"{path.parent.name}/{path.name}", str(path))
-        self.model_combo.addItem("Browse...", "")
-        if current:
-            index = self.model_combo.findData(current)
-            if index >= 0:
-                self.model_combo.setCurrentIndex(index)
-        self.model_combo.blockSignals(False)
-        self.model_picker.setVisible(self.model_combo.currentData() == "")
+        self.model_selector.refresh(list_models())
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
         self.refresh_models()
 
     def _selected_model(self) -> Path | None:
-        data = self.model_combo.currentData()
-        if data:
-            return Path(data)
-        return self.model_picker.path()
+        return self.model_selector.selected_path()
 
     def _inspect(self) -> None:
         path = self._selected_model()
@@ -169,7 +153,7 @@ class ModelPage(QWidget):
             return
         self._current = path
         self.status.set_state("loading", "accent")
-        self._worker = FnWorker(lambda p=path: _probe_model(p), self)
+        self._worker = FnWorker(partial(_probe_model, path), self)
         self._worker.done.connect(self._on_loaded)
         self._worker.failed.connect(self._on_failed)
         self._worker.start()
@@ -189,11 +173,11 @@ class ModelPage(QWidget):
             {
                 "sources": str(fit.get("n_sources", "--")),
                 "train / val": f"{fit.get('n_train', '--')} / {fit.get('n_val', '--')}",
-                "regularization": f"{fit.get('reg_method', '--')} (lambda={_fmt(fit.get('lambda_l2'))})",
+                "regularization": f"{fit.get('reg_method', '--')} (lambda={fmt(fit.get('lambda_l2'))})",
                 "noise model": str(fit.get("noise_model", "--")),
-                "noise std": _fmt(fit.get("noise_std")),
+                "noise std": fmt(fit.get("noise_std")),
                 "altitude law": (
-                    f"a={_fmt(fit.get('altitude_noise_a'))}, b={_fmt(fit.get('altitude_noise_b'))}"
+                    f"a={fmt(fit.get('altitude_noise_a'))}, b={fmt(fit.get('altitude_noise_b'))}"
                     if fit.get("altitude_noise_b") is not None
                     else "--"
                 ),
@@ -202,20 +186,25 @@ class ModelPage(QWidget):
             }
         )
         metadata = data.get("metadata", {}) or {}
+        conformal = data.get("conformal_calibration") or {}
         policy = metadata.get("decision_policy", {}) or {}
         self.policy_grid.set_mapping(
             {
                 "scoring": f"{policy.get('scoring', '--')} ({policy.get('scoring_scale', '--')})",
                 "threshold": (
-                    f"{_fmt(policy.get('threshold'))} (source {policy.get('threshold_source')})"
+                    f"{fmt(policy.get('threshold'))} (source {policy.get('threshold_source')})"
                     if policy.get("threshold") is not None
                     else "none (fraction mode)"
                 ),
-                "rerun fraction": _fmt(policy.get("rerun_fraction")),
+                "rerun fraction": fmt(policy.get("rerun_fraction")),
                 "time weighting": str(policy.get("time_weighting", "--")),
+                "conformal prediction": _conformal_summary(conformal),
             }
             if policy
-            else {"policy": "none packaged (saved via plugin.save without run metadata)"}
+            else {
+                "policy": "none packaged (saved via plugin.save without run metadata)",
+                "conformal prediction": _conformal_summary(conformal),
+            }
         )
         provenance = metadata.get("provenance", {}) or {}
         self.prov_grid.set_mapping(
@@ -275,8 +264,13 @@ class ModelPage(QWidget):
             open_in_file_manager(self._current)
 
 
-def _fmt(value, digits: int = 4) -> str:
-    try:
-        return f"{float(value):.{digits}g}"
-    except (TypeError, ValueError):
-        return "--"
+def _conformal_summary(conformal: dict | None) -> str:
+    """Compact display string for the persisted operational conformal layer."""
+
+    if not conformal or not conformal.get("enabled"):
+        return "off"
+    global_cal = conformal.get("global") or {}
+    scale = fmt(global_cal.get("scale"), digits=3)
+    mode = conformal.get("mode", "--")
+    scope = conformal.get("scope", "--")
+    return f"{scale} ({mode}, {scope})"

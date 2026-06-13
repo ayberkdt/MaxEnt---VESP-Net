@@ -112,6 +112,7 @@ def run(config: dict) -> dict:
                 "max_rerun_fraction": screen["screen"].get("max_rerun_fraction"),
                 "time_weighting": screen.get("time_weighting"),
             },
+            "conformal_prediction": report.get("conformal_calibration"),
             "units": report.get("units", {}),
             "provenance": {
                 "created_at_utc": utc_now_iso(),

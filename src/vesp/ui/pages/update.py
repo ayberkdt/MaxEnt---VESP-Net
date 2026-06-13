@@ -7,10 +7,10 @@ fixed, and the noise/altitude law only recalibrates when fresh held-out data is 
 
 from __future__ import annotations
 
+from functools import partial
 from pathlib import Path
 
 from PyQt6.QtWidgets import (
-    QComboBox,
     QFormLayout,
     QHBoxLayout,
     QLabel,
@@ -18,9 +18,19 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from vesp.ui.helpers import fmt
 from vesp.ui.jobs import FnWorker, open_in_file_manager
 from vesp.ui.paths import list_models
-from vesp.ui.widgets import Card, InfoGrid, LogConsole, PageHeader, PathPicker, StatusChip, make_button
+from vesp.ui.widgets import (
+    Card,
+    InfoGrid,
+    LogConsole,
+    ModelArtifactPicker,
+    PageHeader,
+    PathPicker,
+    StatusChip,
+    make_button,
+)
 
 
 def _run_update(model_path: Path, update_csv: Path, val_csv: Path | None, out_path: Path) -> dict:
@@ -70,7 +80,7 @@ class UpdatePage(QWidget):
             "equal to the batch refit on the concatenated data (same lambda and noise floor).",
         )
         self.status = StatusChip("idle")
-        header.actions.addWidget(self.status)
+        header.add_action(self.status)
         root.addWidget(header)
 
         warn = QLabel(
@@ -90,14 +100,10 @@ class UpdatePage(QWidget):
         form = QFormLayout()
         form.setHorizontalSpacing(14)
         form.setVerticalSpacing(9)
-        self.model_combo = QComboBox()
-        self.model_picker = PathPicker("custom vespuq_plugin.pt", name_filter="VESP-UQ model (*.pt)")
-        self.model_picker.setVisible(False)
-        self.model_combo.currentIndexChanged.connect(
-            lambda _i: self.model_picker.setVisible(self.model_combo.currentData() == "")
-        )
-        form.addRow("Model", self.model_combo)
-        form.addRow("", self.model_picker)
+        self.model_selector = ModelArtifactPicker()
+        self.model_combo = self.model_selector.combo
+        self.model_picker = self.model_selector.custom_picker
+        form.addRow("Model", self.model_selector)
         self.update_csv = PathPicker(
             "new samples: x,y,z + ax_err/.. or ax_ref/..+ax_sur/.. columns", name_filter="CSV (*.csv)"
         )
@@ -128,28 +134,14 @@ class UpdatePage(QWidget):
 
     # ------------------------------------------------------------------ helpers
     def refresh_models(self) -> None:
-        current = self.model_combo.currentData()
-        self.model_combo.blockSignals(True)
-        self.model_combo.clear()
-        for path in list_models():
-            self.model_combo.addItem(f"{path.parent.name}/{path.name}", str(path))
-        self.model_combo.addItem("Browse...", "")
-        if current:
-            index = self.model_combo.findData(current)
-            if index >= 0:
-                self.model_combo.setCurrentIndex(index)
-        self.model_combo.blockSignals(False)
-        self.model_picker.setVisible(self.model_combo.currentData() == "")
+        self.model_selector.refresh(list_models())
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
         self.refresh_models()
 
     def _selected_model(self) -> Path | None:
-        data = self.model_combo.currentData()
-        if data:
-            return Path(data)
-        return self.model_picker.path()
+        return self.model_selector.selected_path()
 
     # ------------------------------------------------------------------ run
     def _run(self) -> None:
@@ -174,9 +166,7 @@ class UpdatePage(QWidget):
         self.run_button.setEnabled(False)
         self.console.append_line(f"[ui] update {model.name} with {update_csv.name}"
                                  + (f" + val {val_csv.name}" if val_csv else " (no recalibration)"))
-        self._worker = FnWorker(
-            lambda m=model, u=update_csv, v=val_csv, o=out_path: _run_update(m, u, v, o), self
-        )
+        self._worker = FnWorker(partial(_run_update, model, update_csv, val_csv, out_path), self)
         self._worker.done.connect(self._on_done)
         self._worker.failed.connect(self._on_failed)
         self._worker.start()
@@ -197,8 +187,10 @@ class UpdatePage(QWidget):
             {
                 "train samples": f"{before.get('n_train', '--')} -> {after.get('n_train', '--')}",
                 "sequential updates": f"{before.get('n_updates', 0)} -> {after.get('n_updates', '--')}",
-                "noise std": f"{_fmt(before.get('noise_std'))} -> {_fmt(after.get('noise_std'))}",
-                "altitude law b": f"{_fmt(before.get('altitude_noise_b'))} -> {_fmt(after.get('altitude_noise_b'))}",
+                "noise std": f"{fmt(before.get('noise_std'))} -> {fmt(after.get('noise_std'))}",
+                "altitude law b": (
+                    f"{fmt(before.get('altitude_noise_b'))} -> {fmt(after.get('altitude_noise_b'))}"
+                ),
                 "saved to": str(data.get("out_path", "--")),
             }
         )
@@ -207,10 +199,3 @@ class UpdatePage(QWidget):
     def _open_out(self) -> None:
         if self._out_path is not None and self._out_path.exists():
             open_in_file_manager(self._out_path)
-
-
-def _fmt(value, digits: int = 4) -> str:
-    try:
-        return f"{float(value):.{digits}g}"
-    except (TypeError, ValueError):
-        return "--"

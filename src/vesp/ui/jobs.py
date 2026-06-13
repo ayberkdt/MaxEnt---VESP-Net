@@ -70,13 +70,14 @@ class ProcessJob(QObject):
         self.started.emit()
 
     def cancel(self) -> None:
-        if self.running:
-            self._process.kill()
+        process = self._process
+        if process is not None and process.state() != QProcess.ProcessState.NotRunning:
+            process.kill()
 
     def _drain(self) -> None:
         if self._process is None:
             return
-        data = bytes(self._process.readAllStandardOutput()).decode("utf-8", errors="replace")
+        data = self._process.readAllStandardOutput().data().decode("utf-8", errors="replace")
         self._buffer += data
         while "\n" in self._buffer:
             line, self._buffer = self._buffer.split("\n", 1)

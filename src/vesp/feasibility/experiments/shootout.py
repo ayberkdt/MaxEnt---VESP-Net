@@ -114,6 +114,12 @@ def _fmt(value) -> str:
     return "-" if v is None else f"{v:.4g}"
 
 
+def _health_cell(row: dict, metric: str) -> str:
+    winner = row.get(f"winner_{metric}", "")
+    mark = {"maxent": " ✅", "ridge": " ❌", "tie": " ≈"}.get(winner, "")
+    return f"{_fmt(row.get('maxent_' + metric))} / {_fmt(row.get('ridge_at_err_' + metric))}{mark}"
+
+
 def _build_markdown(ridge: list[dict], maxent: list[dict], matched: list[dict], tally: dict) -> str:
     lines = [
         "# E7 Regularizer Shootout: L2 vs Entropy at matched data error",
@@ -144,14 +150,10 @@ def _build_markdown(ridge: list[dict], maxent: list[dict], matched: list[dict], 
         "| --- | ---: | --- | --- | --- | --- |",
     ]
     for e in matched:
-        def cell(metric: str) -> str:
-            w = e.get(f"winner_{metric}", "")
-            mark = {"maxent": " ✅", "ridge": " ❌", "tie": " ≈"}.get(w, "")
-            return f"{_fmt(e.get('maxent_' + metric))} / {_fmt(e.get('ridge_at_err_' + metric))}{mark}"
-
         lines.append(
-            f"| {e['run_name']} | {_fmt(e.get(ERROR_KEY))} | {cell('shell_cancellation_ratio')} | "
-            f"{cell('sigma_l2')} | {cell('top_5pct_source_contribution')} | {cell('effective_source_count')} |"
+            f"| {e['run_name']} | {_fmt(e.get(ERROR_KEY))} | {_health_cell(e, 'shell_cancellation_ratio')} | "
+            f"{_health_cell(e, 'sigma_l2')} | {_health_cell(e, 'top_5pct_source_contribution')} | "
+            f"{_health_cell(e, 'effective_source_count')} |"
         )
 
     lines += ["", "## Tally (who is healthier at matched error)", "", "| metric | maxent wins | ridge wins | ties |", "| --- | ---: | ---: | ---: |"]

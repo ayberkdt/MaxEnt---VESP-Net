@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from functools import partial
+
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QHBoxLayout,
@@ -57,18 +59,22 @@ class DashboardPage(QWidget):
             text.setObjectName("PageSubtitle")
             card.add(text)
             card.add_stretch()
-            card.add(make_button("Open", variant="primary", on_click=lambda _=False, p=page: self._navigate(p)))
+            card.add(make_button("Open", variant="primary", on_click=partial(self._navigate, page)))
             actions.addWidget(card)
         root.addLayout(actions)
 
         recent = Card("Recent runs")
         self.table = QTableWidget(0, 4)
         self.table.setHorizontalHeaderLabels(["created (UTC)", "kind", "run", "summary"])
-        self.table.verticalHeader().setVisible(False)
+        vertical_header = self.table.verticalHeader()
+        if vertical_header is not None:
+            vertical_header.setVisible(False)
         self.table.setAlternatingRowColors(True)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self.table.horizontalHeader().setStretchLastSection(True)
+        horizontal_header = self.table.horizontalHeader()
+        if horizontal_header is not None:
+            horizontal_header.setStretchLastSection(True)
         self.table.doubleClicked.connect(lambda _i: self._navigate("runs"))
         recent.add(self.table)
         hint = QLabel(f"Scanning `{OUTPUTS_DIR}` -- double-click a row to open the runs browser.")

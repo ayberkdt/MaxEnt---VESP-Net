@@ -1,6 +1,6 @@
 import pytest
 
-from vesp.common.config import merge_defaults, validate_config
+from vesp.common.config import load_config, merge_defaults, validate_config
 
 
 def _config() -> dict:
@@ -55,3 +55,26 @@ def test_normalized_positions_with_nonunit_body_radius_warns():
 
     with pytest.warns(RuntimeWarning, match="body.R_body=1.0"):
         validate_config(config)
+
+
+def test_load_config_rejects_non_mapping_yaml(tmp_path):
+    path = tmp_path / "bad.yaml"
+    path.write_text("- one\n- two\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="must contain a YAML mapping"):
+        load_config(path)
+
+
+def test_load_config_resolves_nested_references_and_rejects_cycles(tmp_path):
+    leaf = tmp_path / "leaf.yaml"
+    middle = tmp_path / "middle.yaml"
+    root = tmp_path / "root.yaml"
+    leaf.write_text("{}\n", encoding="utf-8")
+    middle.write_text("leaf.yaml\n", encoding="utf-8")
+    root.write_text("middle.yaml\n", encoding="utf-8")
+
+    assert load_config(root)["model"]["type"] == "discrete"
+
+    leaf.write_text("root.yaml\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="cyclic config reference"):
+        load_config(root)

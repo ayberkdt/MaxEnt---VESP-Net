@@ -7,7 +7,7 @@ import logging
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import h5py
 import numpy as np
@@ -15,6 +15,9 @@ import torch
 
 from vesp.adapters.st_lrps.data.dataset_parameters import R_MOON_SI
 from vesp.adapters.st_lrps.shared.contracts import TargetContract
+
+if TYPE_CHECKING:
+    from vesp.adapters.st_lrps.data.datasets import DatasetMeta
 
 logger = logging.getLogger(__name__)
 

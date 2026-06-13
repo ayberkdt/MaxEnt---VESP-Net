@@ -6,7 +6,7 @@ from __future__ import annotations
 import logging
 import math
 from dataclasses import dataclass
-from typing import Any, Dict, List, Mapping, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Mapping, Optional, Tuple
 
 import torch
 import torch.nn as nn
@@ -18,6 +18,9 @@ from vesp.adapters.st_lrps.shared.scaling import (
     compute_base_accel_from_contract,
     compute_base_potential_from_contract,
 )
+
+if TYPE_CHECKING:
+    from vesp.adapters.st_lrps.training.config import TrainConfig
 
 logger = logging.getLogger(__name__)
 
@@ -102,15 +105,15 @@ def _radial_cross_components(
 @dataclass
 class GradNormWeights:
     """
-    Loss-balance weights for the Sobolev objective (w_u · MSE_U + w_a · MSE_a).
+    Loss-balance weights for the Sobolev objective (w_u * MSE_U + w_a * MSE_a).
 
     Three modes controlled by ``mode``:
 
     ``"ntk_init"`` (default)
-        Compute ??L_U/?W? / ??L_a/?W? exactly ONCE on the first training step
+        Compute ||dL_U/dW|| / ||dL_a/dW|| exactly ONCE on the first training step
         using first-order autograd, then freeze w_a for the rest of training.
         Avoids the instability of repeated Hessian-involving updates that arise
-        because a_pred = ?U/?x makes ?L_a/?W a second-order quantity.
+        because a_pred = dU/dx makes dL_a/dW a second-order quantity.
 
     ``"fixed"``
         Use w_u and w_a exactly as set; no gradient computation.
@@ -148,7 +151,7 @@ class GradNormWeights:
         Captures the live weights and the NTK/EMA bookkeeping so a resumed run
         does not recompute (or re-freeze) the gradient-norm ratio from scratch.
         Static configuration (mode, clamps, EMA hyperparameters) is intentionally
-        NOT restored here — it comes from the resumed TrainConfig.
+        NOT restored here â€” it comes from the resumed TrainConfig.
         """
         return {
             "w_u": float(self.w_u),
@@ -302,7 +305,7 @@ class GradNormWeights:
             return False
         if mode == "ntk_init":
             return not self._ntk_done
-        # dynamic: depends on step counter › caller should always try
+        # dynamic: depends on step counter â€º caller should always try
         return True
 
     def get_static_weights(self) -> Tuple[float, float]:
@@ -388,7 +391,7 @@ class LossCurriculum:
 # --- Sobolev Loss ---
 
 class SobolevLoss(nn.Module):
-    """Sobolev loss: w_u·MSE(?U_scaled) + w_a·MSE(?a_scaled). Isometric + GradNorm-ready."""
+    """Sobolev loss: w_uÂ·MSE(?U_scaled) + w_aÂ·MSE(?a_scaled). Isometric + GradNorm-ready."""
     def __init__(
         self,
         scaler: "ScalerPack",
@@ -476,15 +479,15 @@ class SobolevLoss(nn.Module):
         """
         In-batch stochastic Laplacian penalty via the Hutchinson trace estimator.
 
-        Enforces the Laplace equation ?²U = 0 (satisfied by any gravitational
+        Enforces the Laplace equation ?Â²U = 0 (satisfied by any gravitational
         potential in free space) as a soft physics constraint, reusing the
         already-computed in-batch ``grad_u_scaled``.
 
         Algorithm
         ---------
-        Tr(?²U) ? (1/K) ?? v?? ?²U v?,   v? ~ Rademacher{±1}³
+        Tr(?Â²U) ? (1/K) ?? v?? ?Â²U v?,   v? ~ Rademacher{Â±1}Â³
 
-        Using the identity  v? ?²U v = ?(?U · v)/?x · v,  each sample requires
+        Using the identity  v? ?Â²U v = ?(?U Â· v)/?x Â· v,  each sample requires
         one additional autograd call.
 
         Modes
@@ -493,8 +496,8 @@ class SobolevLoss(nn.Module):
             The HVP autograd call uses ``create_graph=False``, so the returned
             scalar is DETACHED from the model parameters: it does NOT
             ``requires_grad`` and contributes **zero** gradient if added to the
-            loss. It is therefore a *physics-violation diagnostic only* — cheap,
-            AMP-compatible, and safe to log. Use this to monitor ?²U without
+            loss. It is therefore a *physics-violation diagnostic only* â€” cheap,
+            AMP-compatible, and safe to log. Use this to monitor ?Â²U without
             perturbing optimisation.
         ``"train"``
             The HVP uses ``create_graph=True`` so gradients flow back into the
@@ -524,7 +527,7 @@ class SobolevLoss(nn.Module):
             v = 2.0 * (torch.rand_like(g_sub) > 0.5).float() - 1.0  # Rademacher (k, 3)
             Jv = (g_sub * v).sum()                                    # scalar
             # ?Jv/?x_scaled. In diagnostic mode create_graph=False (first-order
-            # only, detached › diagnostic). In train mode create_graph=True so the
+            # only, detached â€º diagnostic). In train mode create_graph=True so the
             # penalty can backprop into the model weights.
             # retain_graph=True: the main computational graph (shared with the
             # acceleration loss) must survive for loss.backward() after this call.
@@ -537,7 +540,7 @@ class SobolevLoss(nn.Module):
             trace_acc = trace_acc + (Hv_full[idx] * v).sum(dim=-1)   # (k,)
 
         trace_est = trace_acc / float(K)
-        # Chain-rule scaling: ?²U_phys = ?²U_scaled · (u_scale / x_scale²)
+        # Chain-rule scaling: ?Â²U_phys = ?Â²U_scaled Â· (u_scale / x_scaleÂ²)
         lap_phys = trace_est * (self.u_scale.squeeze(0) / (self.x_scale.squeeze(0) ** 2))
         loss_lap = torch.mean(lap_phys ** 2)
         if mode == "train" and not loss_lap.requires_grad:
@@ -551,7 +554,7 @@ class SobolevLoss(nn.Module):
     def accel_from_u_scaled(
         self, u_scaled: torch.Tensor, x_scaled: torch.Tensor, *, create_graph: bool
     ) -> Tuple[torch.Tensor, torch.Tensor]:
-        """?a_phys = a_sign · ?(?U_scaled)/?(x_scaled) · (u_scale/x_scale). Scalar factor only."""
+        """?a_phys = a_sign Â· ?(?U_scaled)/?(x_scaled) Â· (u_scale/x_scale). Scalar factor only."""
         grad_u_scaled = torch.autograd.grad(
             outputs=u_scaled,
             inputs=x_scaled,
@@ -561,7 +564,7 @@ class SobolevLoss(nn.Module):
             only_inputs=True,
         )[0]  # Shape: (B, 3)
 
-        # FIX-1: Uniform chain rule factor (scalar / scalar) › isotropy preserved!
+        # FIX-1: Uniform chain rule factor (scalar / scalar) â€º isotropy preserved!
         grad_u_phys = grad_u_scaled * (self.u_scale / self.x_scale)
         return self.a_sign * grad_u_phys, grad_u_scaled
 
@@ -624,7 +627,7 @@ class SobolevLoss(nn.Module):
             altitude_max_km=altitude_max_km,
         )
 
-        # ?a via autograd: ?(?U_scaled)/?(x_scaled) · (u_scale/x_scale)
+        # ?a via autograd: ?(?U_scaled)/?(x_scaled) Â· (u_scale/x_scale)
         delta_a_pred_phys, grad_u_scaled = self.accel_from_u_scaled(
             delta_u_scaled_pred, x_scaled, create_graph=is_train
         )
@@ -701,7 +704,7 @@ class SobolevLoss(nn.Module):
             loss_radial_val = float(loss_radial_t.detach().item())
             loss_cross_val = float(loss_cross_t.detach().item())
 
-        # In-batch Laplacian. "diagnostic" is a metric ONLY — it must never enter
+        # In-batch Laplacian. "diagnostic" is a metric ONLY â€” it must never enter
         # the objective (loss_ref/loss_opt) or it would pollute the reported loss
         # and the best-checkpoint metric. "train" backpropagates into the weights.
         _lap_mode = str(laplacian_mode).strip().lower()

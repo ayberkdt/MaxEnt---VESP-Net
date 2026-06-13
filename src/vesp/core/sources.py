@@ -99,7 +99,7 @@ def make_shell_sources(
     weights = []
     shell_ids = []
 
-    for shell_id, (alpha, count) in enumerate(zip(radii, counts)):
+    for shell_id, (alpha, count) in enumerate(zip(radii, counts, strict=True)):
         radius = alpha * body_radius
         points = fibonacci_sphere(count, radius=radius, dtype=dtype, device=device)
 

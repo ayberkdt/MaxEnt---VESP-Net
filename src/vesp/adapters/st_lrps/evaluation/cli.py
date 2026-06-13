@@ -1307,7 +1307,7 @@ def _save_evaluation_plots(a_mag_err, a_pred_mag, a_pred_vec_np, a_rel_floor_abs
         print(f"[warn] cossim_by_altitude.png failed: {_csp_err}")
 
 def _write_evaluation_csvs(a_cross, a_pred_vec_np, a_r, a_true_norms, a_true_vec_np, a_vec_err_norm_np, alt_bin_km, alt_km_all, ang_deg_all, directional_metrics, metrics, norm_binned_ang, ood_table, out_dir, spatial_a_mag, spatial_a_mape, spatial_a_vec, spatial_u, spatial_u_mape):
-    def write_bins_csv(bins: dict[str, Any], path: Path, extra_cols: list[str] = []) -> None:
+    def write_bins_csv(bins: dict[str, Any], path: Path, extra_cols: tuple[str, ...] = ()) -> None:
         header = "alt_km_lo,alt_km_hi,n,rmse"
         if extra_cols:
             header += "," + ",".join(extra_cols)
@@ -1642,11 +1642,11 @@ def evaluate(
             ds_DU_m = float(ds_meta["DU_m"])
             ds_TU_s = float(ds_meta["TU_s"])
             ds_VU_m_s = float(ds_meta["VU_m_s"])
-        except (KeyError, TypeError, ValueError):
+        except (KeyError, TypeError, ValueError) as exc:
             raise ValueError(
                 "Canonical dataset requires DU_m, TU_s, and VU_m_s for SI conversion. "
                 f"Got DU_m={ds_meta.get('DU_m')}, TU_s={ds_meta.get('TU_s')}, VU_m_s={ds_meta.get('VU_m_s')}."
-            )
+            ) from exc
 
     mu_si = float(cfg.get("resolved_mu_si", MU_MOON_SI))
     # Backward-compat: old models stored degree_min only inside dataset_meta

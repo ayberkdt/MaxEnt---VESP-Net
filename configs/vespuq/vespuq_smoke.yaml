@@ -81,12 +81,16 @@ uq:
       enabled: false
       alpha: 0.10                # 1 - alpha is the target held-out force-error coverage
       mode: norm                 # norm | component_max
-  # --- Optional post-hoc reliability layer (scripts/run_calibration_audit.py) ---
-  # Ignored by the main run (python -m vesp.uq.run); read only by the calibration-audit script.
+  # --- Optional post-hoc reliability layer ---
+  # enabled: true is read by scripts/run_calibration_audit.py. The main training run only changes
+  # prediction behavior when apply: true is set, preserving the historical audit-only default.
   conformal:
     enabled: true
+    apply: false                  # true -> persist/apply a conformal predictive-std scale in the model
     alpha: 0.10                  # 1 - alpha is the target held-out force-error coverage
     mode: norm                   # norm | component_max | mahalanobis  (force-error reduction)
+    by_band: false               # true -> fit per-altitude-band scales, with global fallback
+    min_band_n: 30
   audit:
     enabled: true
     audit_fraction: 0.02         # sentinel sample as a fraction of the accepted (low-risk) set

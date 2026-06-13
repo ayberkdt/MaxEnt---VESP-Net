@@ -1,0 +1,503 @@
+{
+  "cases": [
+    {
+      "acceptance": {
+        "all_bands_pass": false,
+        "high": {
+          "picp90_in_range": false,
+          "picp_90": 0.9861932938856016,
+          "z_std": 0.6674091888204199,
+          "z_std_in_range": false
+        },
+        "low": {
+          "picp90_in_range": false,
+          "picp_90": 0.9782608695652174,
+          "z_std": 0.6483593988246839,
+          "z_std_in_range": false
+        },
+        "mid": {
+          "picp90_in_range": false,
+          "picp_90": 0.9619686800894854,
+          "z_std": 0.7155369898246365,
+          "z_std_in_range": true
+        }
+      },
+      "baseline_calibration": {
+        "all": {
+          "mean_epistemic_std": 2.945e-05,
+          "mean_pred_std": 0.000237,
+          "mean_radius": 1.308,
+          "picp_90": 0.96,
+          "rmse": 0.0001925,
+          "z_std": 0.67
+        },
+        "high": {
+          "mean_epistemic_std": 1.094e-05,
+          "mean_pred_std": 0.0002115,
+          "mean_radius": 1.475,
+          "picp_90": 1.0,
+          "rmse": 5.782e-05,
+          "z_std": 0.27
+        },
+        "low": {
+          "mean_epistemic_std": 7.005e-05,
+          "mean_pred_std": 0.000321,
+          "mean_radius": 1.092,
+          "picp_90": 0.87,
+          "rmse": 0.0003575,
+          "z_std": 1.09
+        },
+        "mid": {
+          "mean_epistemic_std": 2.538e-05,
+          "mean_pred_std": 0.0002141,
+          "mean_radius": 1.251,
+          "picp_90": 0.97,
+          "rmse": 0.000139,
+          "z_std": 0.64
+        }
+      },
+      "baseline_report": "benchmarks/vespuq_real_lunar_report.md",
+      "calibration": {
+        "all": {
+          "crps": 8.794530123064737e-05,
+          "ellipsoid_picp_50": 0.824390243902439,
+          "ellipsoid_picp_68": 0.9121951219512195,
+          "ellipsoid_picp_90": 0.9853658536585366,
+          "ellipsoid_picp_95": 0.9926829268292683,
+          "mean_epistemic_std": 2.9450923425068373e-05,
+          "mean_mahalanobis_d2": 1.3851358920624857,
+          "mean_pred_sigma": 0.00022734673750400013,
+          "mean_pred_std": 0.00022734673750400013,
+          "mean_radius": 1.3078713387010967,
+          "median_mahalanobis_d2": 0.843380680937718,
+          "n": 410,
+          "nll": -7.520280608560054,
+          "picp_50": 0.7252032520325203,
+          "picp_68": 0.8569105691056911,
+          "picp_90": 0.975609756097561,
+          "picp_95": 0.9902439024390244,
+          "rmse": 0.00019254248943108634,
+          "z_mean": 0.011759182071086097,
+          "z_std": 0.6806365489760905
+        },
+        "high": {
+          "crps": 3.415547435696843e-05,
+          "ellipsoid_picp_50": 0.8047337278106509,
+          "ellipsoid_picp_68": 0.9349112426035503,
+          "ellipsoid_picp_90": 1.0,
+          "ellipsoid_picp_95": 1.0,
+          "mean_epistemic_std": 1.094062841358898e-05,
+          "mean_mahalanobis_d2": 1.3327177606039415,
+          "mean_pred_sigma": 8.665566335702217e-05,
+          "mean_pred_std": 8.665566335702217e-05,
+          "mean_radius": 1.4748316793179364,
+          "median_mahalanobis_d2": 0.9133690295244268,
+          "n": 169,
+          "nll": -8.212303909187096,
+          "picp_50": 0.7041420118343196,
+          "picp_68": 0.8402366863905325,
+          "picp_90": 0.9861932938856016,
+          "picp_95": 0.9960552268244576,
+          "rmse": 5.7821717065962984e-05,
+          "z_mean": 0.009811182645221283,
+          "z_std": 0.6674091888204199
+        },
+        "low": {
+          "crps": 0.0002014294671972177,
+          "ellipsoid_picp_50": 0.8804347826086957,
+          "ellipsoid_picp_68": 0.9239130434782609,
+          "ellipsoid_picp_90": 0.9891304347826086,
+          "ellipsoid_picp_95": 0.9891304347826086,
+          "mean_epistemic_std": 7.004596916199718e-05,
+          "mean_mahalanobis_d2": 1.2505782843310342,
+          "mean_pred_sigma": 0.0005416029548251243,
+          "mean_pred_std": 0.0005416029548251243,
+          "mean_radius": 1.092495753647269,
+          "median_mahalanobis_d2": 0.6740822933422624,
+          "n": 92,
+          "nll": -6.477783070293394,
+          "picp_50": 0.782608695652174,
+          "picp_68": 0.8804347826086957,
+          "picp_90": 0.9782608695652174,
+          "picp_95": 0.9927536231884058,
+          "rmse": 0.00035748592779907227,
+          "z_mean": 0.017851103607066012,
+          "z_std": 0.6483593988246839
+        },
+        "mid": {
+          "crps": 7.888447889995792e-05,
+          "ellipsoid_picp_50": 0.8120805369127517,
+          "ellipsoid_picp_68": 0.8791946308724832,
+          "ellipsoid_picp_90": 0.9664429530201343,
+          "ellipsoid_picp_95": 0.9865771812080537,
+          "mean_epistemic_std": 2.5380424426025186e-05,
+          "mean_mahalanobis_d2": 1.5276725640610587,
+          "mean_pred_sigma": 0.00019288512366034814,
+          "mean_pred_std": 0.00019288512366034814,
+          "mean_radius": 1.251483796826642,
+          "median_mahalanobis_d2": 0.8037035888964827,
+          "n": 149,
+          "nll": -7.379058029463156,
+          "picp_50": 0.7136465324384788,
+          "picp_68": 0.8612975391498882,
+          "picp_90": 0.9619686800894854,
+          "picp_95": 0.9821029082774049,
+          "rmse": 0.00013896777993276202,
+          "z_mean": 0.01020720302183104,
+          "z_std": 0.7155369898246365
+        }
+      },
+      "config_path": "configs/vespuq/vespuq_real_lunar.yaml",
+      "conformal": {
+        "alpha": 0.1,
+        "apply": true,
+        "bands": [
+          {
+            "alpha": 0.1,
+            "coverage_after": 0.9354838709677419,
+            "coverage_before": 0.7419354838709677,
+            "mode": "norm",
+            "n_calibration": 31,
+            "name": "low",
+            "quantile_level": 0.9354838709677419,
+            "radius_range": [
+              1.03,
+              1.15
+            ],
+            "scale": 1.687214445937472,
+            "target_coverage": 0.9,
+            "used": true
+          },
+          {
+            "alpha": 0.1,
+            "coverage_after": 0.9152542372881356,
+            "coverage_before": 0.9152542372881356,
+            "mode": "norm",
+            "n_calibration": 59,
+            "name": "mid",
+            "quantile_level": 0.9152542372881356,
+            "radius_range": [
+              1.15,
+              1.35
+            ],
+            "scale": 0.9009234400682289,
+            "target_coverage": 0.9,
+            "used": true
+          },
+          {
+            "alpha": 0.1,
+            "coverage_after": 0.921875,
+            "coverage_before": 1.0,
+            "mode": "norm",
+            "n_calibration": 64,
+            "name": "high",
+            "quantile_level": 0.921875,
+            "radius_range": [
+              1.35,
+              1.6
+            ],
+            "scale": 0.40981551752067386,
+            "target_coverage": 0.9,
+            "used": true
+          }
+        ],
+        "enabled": true,
+        "extrapolation_rule": "queries outside a fitted band use the global conformal scale",
+        "global": {
+          "alpha": 0.1,
+          "coverage_after": 0.9090909090909091,
+          "coverage_before": 0.9155844155844156,
+          "mode": "norm",
+          "n_calibration": 154,
+          "quantile_level": 0.9090909090909091,
+          "scale": 0.8945661283751243,
+          "target_coverage": 0.9
+        },
+        "min_band_n": 30,
+        "mode": "norm",
+        "scope": "per_band"
+      },
+      "label": "L60",
+      "run_dir": "conformal_validation_runs\\vespuq_real_lunar_conformal",
+      "runtime": {
+        "calibration_eval_seconds": 0.09514909999779775,
+        "fit_seconds": 2.7186034000005748,
+        "note": "VESP-UQ is evaluated at output trajectory points only, not inside every integrator RHS call.",
+        "score_ms_per_trajectory": 15.153806729999996,
+        "score_seconds_total": 151.53806729999997,
+        "score_us_per_output_point": 126.28172274999996
+      },
+      "summary": {
+        "capture_rate": 0.6712871287128713,
+        "epistemic_grows_at_low_altitude": true,
+        "error_ratio_flagged_to_accepted": 1.5687277642178206,
+        "lift_over_random": 3.3564356435643563,
+        "low_band_calibrated_90": true,
+        "low_band_ellipsoid_picp_90": 0.9891304347826086,
+        "low_band_picp_90": 0.9782608695652174,
+        "low_high_epistemic_std_ratio": 6.402371647591603,
+        "low_high_pred_sigma_ratio": 6.250058378685705,
+        "n_flagged": 2000,
+        "rerun_fraction": 0.2,
+        "screen_concentrates_error": true,
+        "selection_mode": "fraction",
+        "spearman_risk_vs_error": 0.7678085326420854,
+        "zero_alarms": false
+      }
+    },
+    {
+      "acceptance": {
+        "all_bands_pass": false,
+        "high": {
+          "picp90_in_range": false,
+          "picp_90": 0.980276134122288,
+          "z_std": 0.562655579468023,
+          "z_std_in_range": false
+        },
+        "low": {
+          "picp90_in_range": false,
+          "picp_90": 0.9746376811594203,
+          "z_std": 0.6208867912926261,
+          "z_std_in_range": false
+        },
+        "mid": {
+          "picp90_in_range": true,
+          "picp_90": 0.9373601789709173,
+          "z_std": 0.8333173619244639,
+          "z_std_in_range": true
+        }
+      },
+      "baseline_calibration": {
+        "all": {
+          "mean_epistemic_std": 0.0001574,
+          "mean_pred_std": 0.0001926,
+          "mean_radius": 1.308,
+          "picp_90": 1.0,
+          "rmse": 4.949e-05,
+          "z_std": 0.09
+        },
+        "high": {
+          "mean_epistemic_std": 1.175e-05,
+          "mean_pred_std": 6.514e-05,
+          "mean_radius": 1.475,
+          "picp_90": 1.0,
+          "rmse": 1.311e-06,
+          "z_std": 0.02
+        },
+        "low": {
+          "mean_epistemic_std": 0.0005734,
+          "mean_pred_std": 0.0005806,
+          "mean_radius": 1.092,
+          "picp_90": 1.0,
+          "rmse": 0.000104,
+          "z_std": 0.17
+        },
+        "mid": {
+          "mean_epistemic_std": 6.562e-05,
+          "mean_pred_std": 9.757e-05,
+          "mean_radius": 1.251,
+          "picp_90": 1.0,
+          "rmse": 7.805e-06,
+          "z_std": 0.07
+        }
+      },
+      "baseline_report": "benchmarks/vespuq_real_lunar_L90_report.md",
+      "calibration": {
+        "all": {
+          "crps": 1.3846015407244292e-05,
+          "ellipsoid_picp_50": 0.8512195121951219,
+          "ellipsoid_picp_68": 0.8975609756097561,
+          "ellipsoid_picp_90": 0.9536585365853658,
+          "ellipsoid_picp_95": 0.9658536585365853,
+          "mean_epistemic_std": 0.00015735022198962113,
+          "mean_mahalanobis_d2": 1.331216964948025,
+          "mean_pred_sigma": 3.9218376716283564e-05,
+          "mean_pred_std": 3.9218376716283564e-05,
+          "mean_radius": 1.3078713387010967,
+          "median_mahalanobis_d2": 0.4224251333959401,
+          "n": 410,
+          "nll": -10.53372624780004,
+          "picp_50": 0.8032520325203252,
+          "picp_68": 0.8902439024390244,
+          "picp_90": 0.9634146341463414,
+          "picp_95": 0.9747967479674797,
+          "rmse": 4.94932151275616e-05,
+          "z_mean": 0.0007276560482482462,
+          "z_std": 0.6854238251295677
+        },
+        "high": {
+          "crps": 7.767772552275015e-07,
+          "ellipsoid_picp_50": 0.9289940828402367,
+          "ellipsoid_picp_68": 0.9467455621301775,
+          "ellipsoid_picp_90": 0.9704142011834319,
+          "ellipsoid_picp_95": 0.9822485207100592,
+          "mean_epistemic_std": 1.1754891447954787e-05,
+          "mean_mahalanobis_d2": 0.7966033664967132,
+          "mean_pred_sigma": 2.281795021266083e-06,
+          "mean_pred_std": 2.281795021266083e-06,
+          "mean_radius": 1.4748316793179364,
+          "median_mahalanobis_d2": 0.22980173180789032,
+          "n": 169,
+          "nll": -11.913590301198616,
+          "picp_50": 0.8619329388560157,
+          "picp_68": 0.9230769230769231,
+          "picp_90": 0.980276134122288,
+          "picp_95": 0.9881656804733728,
+          "rmse": 1.311121524355036e-06,
+          "z_mean": -0.03299943631764331,
+          "z_std": 0.562655579468023
+        },
+        "low": {
+          "crps": 5.4145890847593594e-05,
+          "ellipsoid_picp_50": 0.8478260869565217,
+          "ellipsoid_picp_68": 0.9130434782608695,
+          "ellipsoid_picp_90": 0.967391304347826,
+          "ellipsoid_picp_95": 0.9782608695652174,
+          "mean_epistemic_std": 0.0005733671267621533,
+          "mean_mahalanobis_d2": 1.2926862569440964,
+          "mean_pred_sigma": 0.00015727627181056074,
+          "mean_pred_std": 0.00015727627181056074,
+          "mean_radius": 1.092495753647269,
+          "median_mahalanobis_d2": 0.6617253296474381,
+          "n": 92,
+          "nll": -8.015254677035555,
+          "picp_50": 0.8152173913043478,
+          "picp_68": 0.9130434782608695,
+          "picp_90": 0.9746376811594203,
+          "picp_95": 0.9891304347826086,
+          "rmse": 0.00010399413912083762,
+          "z_mean": -0.008991355105910422,
+          "z_std": 0.6208867912926261
+        },
+        "mid": {
+          "crps": 3.78636914669867e-06,
+          "ellipsoid_picp_50": 0.7651006711409396,
+          "ellipsoid_picp_68": 0.8322147651006712,
+          "ellipsoid_picp_90": 0.9261744966442953,
+          "ellipsoid_picp_95": 0.9395973154362416,
+          "mean_epistemic_std": 6.561905167061882e-05,
+          "mean_mahalanobis_d2": 1.9613815506838175,
+          "mean_pred_sigma": 8.218081130944327e-06,
+          "mean_pred_std": 8.218081130944327e-06,
+          "mean_radius": 1.251483796826642,
+          "median_mahalanobis_d2": 0.7227532962930758,
+          "n": 149,
+          "nll": -10.52367496918241,
+          "picp_50": 0.7293064876957495,
+          "picp_68": 0.8389261744966443,
+          "picp_90": 0.9373601789709173,
+          "picp_95": 0.9507829977628636,
+          "rmse": 7.804986284465304e-06,
+          "z_mean": 0.04498287508192789,
+          "z_std": 0.8333173619244639
+        }
+      },
+      "config_path": "configs/vespuq/vespuq_real_lunar_L90.yaml",
+      "conformal": {
+        "alpha": 0.1,
+        "apply": true,
+        "bands": [
+          {
+            "alpha": 0.1,
+            "coverage_after": 0.9354838709677419,
+            "coverage_before": 1.0,
+            "mode": "norm",
+            "n_calibration": 31,
+            "name": "low",
+            "quantile_level": 0.9354838709677419,
+            "radius_range": [
+              1.03,
+              1.15
+            ],
+            "scale": 0.27086282807004664,
+            "target_coverage": 0.9,
+            "used": true
+          },
+          {
+            "alpha": 0.1,
+            "coverage_after": 0.9152542372881356,
+            "coverage_before": 1.0,
+            "mode": "norm",
+            "n_calibration": 59,
+            "name": "mid",
+            "quantile_level": 0.9152542372881356,
+            "radius_range": [
+              1.15,
+              1.35
+            ],
+            "scale": 0.08422461129399757,
+            "target_coverage": 0.9,
+            "used": true
+          },
+          {
+            "alpha": 0.1,
+            "coverage_after": 0.921875,
+            "coverage_before": 1.0,
+            "mode": "norm",
+            "n_calibration": 64,
+            "name": "high",
+            "quantile_level": 0.921875,
+            "radius_range": [
+              1.35,
+              1.6
+            ],
+            "scale": 0.03503114191462066,
+            "target_coverage": 0.9,
+            "used": true
+          }
+        ],
+        "enabled": true,
+        "extrapolation_rule": "queries outside a fitted band use the global conformal scale",
+        "global": {
+          "alpha": 0.1,
+          "coverage_after": 0.9090909090909091,
+          "coverage_before": 1.0,
+          "mode": "norm",
+          "n_calibration": 154,
+          "quantile_level": 0.9090909090909091,
+          "scale": 0.12572359605163388,
+          "target_coverage": 0.9
+        },
+        "min_band_n": 30,
+        "mode": "norm",
+        "scope": "per_band"
+      },
+      "label": "L90",
+      "run_dir": "conformal_validation_runs\\vespuq_real_lunar_L90_conformal",
+      "runtime": {
+        "calibration_eval_seconds": 0.23811400000340655,
+        "fit_seconds": 1.4760805000005348,
+        "note": "VESP-UQ is evaluated at output trajectory points only, not inside every integrator RHS call.",
+        "score_ms_per_trajectory": 17.24445893000011,
+        "score_seconds_total": 172.4445893000011,
+        "score_us_per_output_point": 143.70382441666757
+      },
+      "summary": {
+        "capture_rate": 0.7290874524714829,
+        "epistemic_grows_at_low_altitude": true,
+        "error_ratio_flagged_to_accepted": 5.225783634110777,
+        "lift_over_random": 3.6454372623574143,
+        "low_band_calibrated_90": true,
+        "low_band_ellipsoid_picp_90": 0.967391304347826,
+        "low_band_picp_90": 0.9746376811594203,
+        "low_high_epistemic_std_ratio": 48.77689677533453,
+        "low_high_pred_sigma_ratio": 68.92655577944683,
+        "n_flagged": 2000,
+        "rerun_fraction": 0.2,
+        "screen_concentrates_error": true,
+        "selection_mode": "fraction",
+        "spearman_risk_vs_error": 0.8683419809234199,
+        "zero_alarms": false
+      }
+    }
+  ],
+  "schema_version": 1,
+  "target_picp90": [
+    0.85,
+    0.95
+  ],
+  "target_z_std": [
+    0.7,
+    1.3
+  ]
+}

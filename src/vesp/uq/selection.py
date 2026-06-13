@@ -59,16 +59,21 @@ class RiskScreeningReport:
 
 
 def _spearman(a: torch.Tensor, b: torch.Tensor) -> float:
-    """Spearman rank correlation (no scipy); ties broken by argsort order."""
+    """Spearman rank correlation (no scipy), using average ranks for ties."""
 
-    if a.numel() < 2:
+    if a.numel() != b.numel():
+        raise ValueError("Spearman inputs must have the same length")
+    if b.device != a.device:
+        b = b.to(device=a.device)
+    if a.numel() < 2 or not bool(torch.isfinite(a).all()) or not bool(torch.isfinite(b).all()):
         return float("nan")
 
     def _rank(x: torch.Tensor) -> torch.Tensor:
-        order = torch.argsort(x)
-        ranks = torch.empty_like(order, dtype=torch.float64)
-        ranks[order] = torch.arange(x.numel(), dtype=torch.float64)
-        return ranks
+        _, inverse, counts = torch.unique(x, sorted=True, return_inverse=True, return_counts=True)
+        counts = counts.to(dtype=torch.float64)
+        starts = torch.cumsum(counts, dim=0) - counts
+        average_ranks = starts + (counts - 1.0) / 2.0
+        return average_ranks[inverse]
 
     ra, rb = _rank(a), _rank(b)
     ra = ra - ra.mean()
@@ -114,6 +119,8 @@ def select_reruns(
     n = int(risk.numel())
     if n == 0:
         raise ValueError("risk_scores is empty")
+    if not bool(torch.isfinite(risk).all()):
+        raise ValueError("risk_scores must contain only finite values")
     if fraction_policy not in FRACTION_POLICIES:
         raise ValueError(f"fraction_policy must be one of {FRACTION_POLICIES}, got {fraction_policy!r}")
 
@@ -145,14 +152,16 @@ def select_reruns(
     applied_fraction_policy: str | None = None
 
     if selection_mode == "fraction":
+        if rerun_fraction is None:
+            raise AssertionError("fraction mode requires rerun_fraction")
         f = float(rerun_fraction)
-        if not 0.0 < f <= 1.0:
+        if not math.isfinite(f) or not 0.0 < f <= 1.0:
             raise ValueError("rerun_fraction must be in (0, 1]")
         applied_fraction_policy = fraction_policy
         k = n if f >= 1.0 else min(n, int(math.ceil(f * n)))
         n_requested = k
         if fraction_policy == "topk":
-            flagged_mask = torch.zeros(n, dtype=torch.bool)
+            flagged_mask = torch.zeros(n, dtype=torch.bool, device=risk.device)
             flagged_mask[order[:k]] = True
             cutoff = float(risk[order[k - 1]]) if k > 0 else float("inf")
             thr = cutoff
@@ -162,7 +171,11 @@ def select_reruns(
             flagged_mask = risk >= thr
             n_ties_at_cutoff = int((risk == thr).sum())
     else:
+        if threshold is None:
+            raise AssertionError("threshold mode requires threshold")
         thr = float(threshold)
+        if not math.isfinite(thr):
+            raise ValueError("threshold must be finite")
         above_mask = risk >= thr
         n_above_threshold = int(above_mask.sum())
         if threshold_source is None:
@@ -170,8 +183,10 @@ def select_reruns(
         if selection_mode == "threshold":
             flagged_mask = above_mask
         else:  # threshold + max_fraction
+            if max_rerun_fraction is None:
+                raise AssertionError("threshold+max_fraction mode requires max_rerun_fraction")
             mf = float(max_rerun_fraction)
-            if not 0.0 < mf <= 1.0:
+            if not math.isfinite(mf) or not 0.0 < mf <= 1.0:
                 raise ValueError("max_rerun_fraction must be in (0, 1]")
             cap = int(math.ceil(mf * n))
             cap = max(1, cap) if n_above_threshold > 0 else 0
@@ -179,7 +194,7 @@ def select_reruns(
             if n_above_threshold <= cap:
                 flagged_mask = above_mask
             else:
-                flagged_mask = torch.zeros(n, dtype=torch.bool)
+                flagged_mask = torch.zeros(n, dtype=torch.bool, device=risk.device)
                 flagged_mask[order[:cap]] = True
 
     accepted_mask = ~flagged_mask
@@ -196,20 +211,25 @@ def select_reruns(
         mean_risk_accepted=float(risk[accepted_mask].mean()) if bool(accepted_mask.any()) else float("nan"),
         selection_mode=selection_mode,
         fraction_policy=applied_fraction_policy,
-        requested_rerun_fraction=float(rerun_fraction) if has_frac else None,
+        requested_rerun_fraction=float(rerun_fraction) if rerun_fraction is not None else None,
         n_requested=n_requested,
         n_ties_at_cutoff=n_ties_at_cutoff,
-        max_rerun_fraction=float(max_rerun_fraction) if has_max else None,
+        max_rerun_fraction=float(max_rerun_fraction) if max_rerun_fraction is not None else None,
         n_above_threshold=n_above_threshold,
         threshold_source=threshold_source,
         threshold_quantile=threshold_quantile,
     )
 
     if true_error is not None:
-        err = _as_1d(true_error)
+        err = _as_1d(true_error).to(device=risk.device)
         if err.numel() != n:
             raise ValueError("true_error must have one value per trajectory")
-        high_thr = float(torch.quantile(err, float(true_error_quantile)))
+        if not bool(torch.isfinite(err).all()):
+            raise ValueError("true_error must contain only finite values")
+        error_quantile = float(true_error_quantile)
+        if not math.isfinite(error_quantile) or not 0.0 <= error_quantile <= 1.0:
+            raise ValueError("true_error_quantile must be in [0, 1]")
+        high_thr = float(torch.quantile(err, error_quantile))
         truly_high = err >= high_thr
         n_high = int(truly_high.sum())
         true_positive = int((flagged_mask & truly_high).sum())

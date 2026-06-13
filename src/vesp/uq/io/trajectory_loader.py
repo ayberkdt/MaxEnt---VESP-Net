@@ -17,6 +17,7 @@ scale raise a clear error (never a silent normalized fallback); see :mod:`vesp.u
 from __future__ import annotations
 
 import csv
+from collections.abc import Mapping
 from pathlib import Path
 
 import torch
@@ -44,7 +45,7 @@ def _first_match(fields: set[str], options) -> str | None:
     return next((o for o in options if o in fields), None)
 
 
-def _resolve_group(fields: set[str], aliases: dict[str, tuple[str, ...]]) -> dict[str, str] | None:
+def _resolve_group(fields: set[str], aliases: Mapping[str, tuple[str, ...]]) -> dict[str, str] | None:
     """Return logical->actual column map if *all* logical names resolve, else ``None``."""
 
     selected: dict[str, str] = {}
@@ -150,6 +151,7 @@ def load_trajectory_csv(
             if time_col is not None:
                 rec["t"] = float(row[time_col])
             if has_accel:
+                assert sur_cols is not None and ref_cols is not None
                 rec["sur"] = [float(row[sur_cols[c]]) for c in SURROGATE_COLUMNS]
                 rec["ref"] = [float(row[ref_cols[c]]) for c in REFERENCE_COLUMNS]
             groups[tid].append(rec)
@@ -167,6 +169,7 @@ def load_trajectory_csv(
     def _accel_to_model(values: torch.Tensor) -> torch.Tensor:
         if not convert_accel:
             return values
+        assert acceleration_scale is not None
         return acceleration_to_model_units(values, acceleration_scale, source_units=accel_units).to(
             dtype=dtype, device=device
         )
@@ -203,7 +206,9 @@ def load_trajectory_csv(
             "csv_acceleration_units": accel_units,
             "acceleration_converted_to_model": bool(convert_accel and has_accel),
             "acceleration_scale_m_s2": (
-                acceleration_scale.scale_m_s2 if (convert_accel and has_accel) else None
+                acceleration_scale.scale_m_s2
+                if (convert_accel and has_accel and acceleration_scale is not None)
+                else None
             ),
             "positions_converted_to_model": bool(positions_converted),
             "position_units": (
@@ -234,6 +239,8 @@ def flatten_acceleration_pairs(dataset: TrajectoryDataset):
             "dataset has no surrogate/reference acceleration pairs (positions-only Format A); "
             "load a Format-B CSV to fit residual-force error"
         )
+    assert dataset.surrogate_accelerations is not None
+    assert dataset.reference_accelerations is not None
     positions = torch.cat(dataset.trajectories, dim=0)
     surrogate = torch.cat(dataset.surrogate_accelerations, dim=0)
     reference = torch.cat(dataset.reference_accelerations, dim=0)

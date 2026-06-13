@@ -145,15 +145,32 @@ def _normalize_legacy(config: dict) -> dict:
     return cfg
 
 
+def _load_config_document(path: str | Path) -> dict:
+    current = Path(path).expanduser().resolve()
+    seen: set[Path] = set()
+
+    while True:
+        if current in seen:
+            raise ValueError(f"cyclic config reference detected at {current}")
+        seen.add(current)
+
+        with current.open("r", encoding="utf-8") as handle:
+            loaded = yaml.safe_load(handle)
+        if isinstance(loaded, str):
+            reference = loaded.strip()
+            if not reference:
+                raise ValueError(f"config reference in {current} is empty")
+            current = (current.parent / reference).expanduser().resolve()
+            continue
+        if loaded is None:
+            return {}
+        if not isinstance(loaded, dict):
+            raise ValueError(f"config {current} must contain a YAML mapping or a config-file reference")
+        return loaded
+
+
 def load_config(path: str | Path) -> dict:
-    path = Path(path)
-    with path.open("r", encoding="utf-8") as f:
-        loaded = yaml.safe_load(f)
-    if isinstance(loaded, str):
-        ref = (path.parent / loaded).resolve()
-        with ref.open("r", encoding="utf-8") as f:
-            loaded = yaml.safe_load(f)
-    cfg = merge_defaults(_normalize_legacy(loaded or {}))
+    cfg = merge_defaults(_load_config_document(path))
     validate_config(cfg)
     return cfg
 

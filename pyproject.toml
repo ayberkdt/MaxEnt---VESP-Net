@@ -22,7 +22,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest", "ruff==0.15.16", "hypothesis"]
+dev = ["pytest", "ruff==0.15.16", "hypothesis", "mypy"]
 
 [tool.setuptools]
 package-dir = {"" = "src"}
@@ -61,3 +61,16 @@ ignore = ["E501"]
 [tool.ruff.format]
 # Provided so `ruff format` works locally with the same line length; not enforced in CI (N2 scope).
 line-ending = "lf"
+
+[tool.mypy]
+# N21: scoped type-checking gate for the maintained UQ/common/UI surface. The legacy feasibility
+# tree and exploratory adapters stay outside this gate, mirroring the lint-scope decision.
+python_version = "3.12"
+mypy_path = "src"
+files = ["src/vesp/uq", "src/vesp/common", "src/vesp/ui"]
+ignore_missing_imports = true
+follow_imports = "silent"
+check_untyped_defs = false
+warn_unused_ignores = false
+warn_return_any = false
+show_error_codes = true
